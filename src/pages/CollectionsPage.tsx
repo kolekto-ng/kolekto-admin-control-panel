@@ -8,6 +8,7 @@ import { Loader2, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
+import { Link } from 'react-router-dom';
 import {
   Select,
   SelectContent,
@@ -152,7 +153,9 @@ const CollectionsPage = () => {
                       <td>{getStatusBadge(collection.status)}</td>
                       <td>{formatDate(collection.dateCreated)}</td>
                       <td>
-                        <Button variant="ghost" size="sm">View</Button>
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link to={`/collections/${collection.id}`}>View</Link>
+                        </Button>
                       </td>
                     </tr>
                   ))

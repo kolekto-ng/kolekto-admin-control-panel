@@ -8,6 +8,7 @@ import { Loader2, Search, UserRound } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatDate } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
+import { Link } from 'react-router-dom';
 
 const UsersPage = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -124,7 +125,9 @@ const UsersPage = () => {
                       <td>{formatDate(user.dateJoined)}</td>
                       <td>{getUserStatusBadge(user.status)}</td>
                       <td>
-                        <Button variant="ghost" size="sm">View</Button>
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link to={`/users/${user.id}`}>View</Link>
+                        </Button>
                       </td>
                     </tr>
                   ))

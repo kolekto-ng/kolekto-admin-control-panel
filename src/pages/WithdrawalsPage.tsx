@@ -8,6 +8,7 @@ import { Loader2, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
+import { Link } from 'react-router-dom';
 import {
   Select,
   SelectContent,
@@ -199,7 +200,9 @@ const WithdrawalsPage = () => {
                               </Button>
                             </>
                           )}
-                          <Button variant="ghost" size="sm">View</Button>
+                          <Button variant="ghost" size="sm" asChild>
+                            <Link to={`/withdrawals/${withdrawal.id}`}>View</Link>
+                          </Button>
                         </div>
                       </td>
                     </tr>
