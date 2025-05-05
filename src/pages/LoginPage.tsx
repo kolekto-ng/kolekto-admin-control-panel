@@ -22,10 +22,15 @@ const LoginPage = () => {
       
       // For demo, hardcode admin credentials
       if (email === 'admin@kolekto.com' && password === 'admin123') {
+        // Set authentication state in localStorage
+        localStorage.setItem('kolekto-admin-auth', 'true');
+        
         toast({
           title: 'Login successful',
           description: 'Welcome to Kolekto Admin Dashboard',
         });
+        
+        // Navigate to dashboard
         navigate('/');
       } else {
         toast({
