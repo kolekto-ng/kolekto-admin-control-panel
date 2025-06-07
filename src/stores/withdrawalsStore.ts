@@ -42,13 +42,7 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
           `
           *,
           collections (
-            title,
-            organizer_id
-          ),
-          profiles!withdrawals_organizer_id_fkey (
-            full_name,
-            email
-          )
+            title          )
         `
         )
         .order("created_at", { ascending: false });
@@ -56,6 +50,8 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
       if (error) {
         throw error;
       }
+
+      console.log(withdrawalsData, "withdrawalsData");
 
       const formattedWithdrawals: Withdrawal[] =
         withdrawalsData?.map((withdrawal: any) => ({
@@ -67,9 +63,12 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
           requestedAmount: withdrawal.amount,
           dateRequested: withdrawal.created_at,
           status: withdrawal.status,
-          bankName: withdrawal.bank_name,
-          accountNumber: withdrawal.account_number,
-          accountName: withdrawal.account_name,
+          bankName:
+            withdrawal.destination_account.bank_name ||
+            withdrawal.destination_account.bank_code ||
+            "Unknown Bank",
+          accountNumber: withdrawal.destination_account.accountNumber,
+          accountName: withdrawal.destination_account.accountName,
         })) || [];
 
       set({
@@ -106,13 +105,13 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
       // }
 
       // Update local state
-      // set((state) => ({
-      //   withdrawals: state.withdrawals.map((withdrawal) =>
-      //     withdrawal.id === id
-      //       ? { ...withdrawal, status: "approved" as const }
-      //       : withdrawal
-      //   ),
-      // }));
+      set((state) => ({
+        withdrawals: state.withdrawals.map((withdrawal) =>
+          withdrawal.id === id
+            ? { ...withdrawal, status: "approved" as const }
+            : withdrawal
+        ),
+      }));
     } catch (error) {
       console.error("Error approving withdrawal:", error);
       set({ error: "Failed to approve withdrawal" });
@@ -121,15 +120,9 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
 
   rejectWithdrawal: async (id: string) => {
     try {
-      const { error } = await supabase
-        .from("withdrawals")
-        .update({ status: "rejected" })
-        .eq("id", id);
-
-      if (error) {
-        throw error;
-      }
-
+      console.log("Rejecting withdrawal with ID:", id);
+      // Call the API to reject the withdrawal
+      await axiosInstance.post("/withdrawals/reject", { id });
       // Update local state
       set((state) => ({
         withdrawals: state.withdrawals.map((withdrawal) =>

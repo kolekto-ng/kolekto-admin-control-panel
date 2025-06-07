@@ -19,6 +19,9 @@ const WithdrawalDetailPage = () => {
 
   const withdrawal = id ? getWithdrawalById(id) : null;
 
+  console.log(withdrawal, 'Withdrawal Detail Page');
+
+
   useEffect(() => {
     if (withdrawals.length === 0) {
       fetchWithdrawals();
@@ -40,7 +43,7 @@ const WithdrawalDetailPage = () => {
 
   const handleApprove = async () => {
     if (!withdrawal) return;
-    
+
     setActionLoading(true);
     try {
       await approveWithdrawal(withdrawal.id);
@@ -61,7 +64,7 @@ const WithdrawalDetailPage = () => {
 
   const handleReject = async () => {
     if (!withdrawal) return;
-    
+
     setActionLoading(true);
     try {
       await rejectWithdrawal(withdrawal.id);
@@ -116,22 +119,22 @@ const WithdrawalDetailPage = () => {
         <div className="flex space-x-2">
           {withdrawal.status === 'pending' && (
             <>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="border-status-error text-status-error hover:bg-status-error/5"
                 onClick={handleReject}
                 disabled={actionLoading}
               >
-                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <X className="h-4 w-4 mr-1" />} 
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <X className="h-4 w-4 mr-1" />}
                 Reject
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="border-status-success text-status-success hover:bg-status-success/5"
                 onClick={handleApprove}
                 disabled={actionLoading}
               >
-                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />} 
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />}
                 Approve
               </Button>
             </>
@@ -158,34 +161,34 @@ const WithdrawalDetailPage = () => {
                 <div>{getStatusBadge(withdrawal.status)}</div>
               </div>
             </div>
-            
+
             <Separator />
-            
+
             <div>
               <div className="text-sm text-muted-foreground">Collection</div>
               <div className="font-medium">
-                <Link 
-                  to={`/collections/${withdrawal.collectionId}`} 
+                <Link
+                  to={`/collections/${withdrawal.collectionId}`}
                   className="hover:underline"
                 >
                   {withdrawal.collectionName}
                 </Link>
               </div>
             </div>
-            
+
             <div>
               <div className="text-sm text-muted-foreground">Host</div>
               <div className="font-medium">{withdrawal.hostName}</div>
               <div className="text-xs text-muted-foreground">{withdrawal.hostEmail}</div>
             </div>
-            
+
             <div>
               <div className="text-sm text-muted-foreground">Date Requested</div>
               <div className="font-medium">{formatDate(withdrawal.dateRequested)}</div>
             </div>
           </CardContent>
         </Card>
-        
+
         {/* Bank Details */}
         <Card>
           <CardHeader>
@@ -197,19 +200,19 @@ const WithdrawalDetailPage = () => {
               <div className="text-sm text-muted-foreground">Bank Name</div>
               <div className="font-medium">{withdrawal.bankName}</div>
             </div>
-            
+
             <div>
               <div className="text-sm text-muted-foreground">Account Name</div>
               <div className="font-medium">{withdrawal.accountName}</div>
             </div>
-            
+
             <div>
               <div className="text-sm text-muted-foreground">Account Number</div>
               <div className="font-medium">{withdrawal.accountNumber}</div>
             </div>
-            
+
             <Separator />
-            
+
             {withdrawal.status === 'approved' && (
               <div className="bg-status-success/5 border border-status-success/20 rounded-md p-4">
                 <div className="font-medium text-status-success">Withdrawal Approved</div>
@@ -219,7 +222,7 @@ const WithdrawalDetailPage = () => {
                 </div>
               </div>
             )}
-            
+
             {withdrawal.status === 'rejected' && (
               <div className="bg-status-error/5 border border-status-error/20 rounded-md p-4">
                 <div className="font-medium text-status-error">Withdrawal Rejected</div>
@@ -229,7 +232,7 @@ const WithdrawalDetailPage = () => {
                 </div>
               </div>
             )}
-            
+
             {withdrawal.status === 'pending' && (
               <div className="bg-status-pending/5 border border-status-pending/20 rounded-md p-4">
                 <div className="font-medium text-status-pending">Action Required</div>

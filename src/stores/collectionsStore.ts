@@ -1,6 +1,5 @@
-
-import { create } from 'zustand';
-import { supabase } from '@/integrations/supabase/client';
+import { create } from "zustand";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface Collection {
   id: string;
@@ -10,7 +9,7 @@ export interface Collection {
   targetAmount: number;
   raisedAmount: number;
   contributors: number;
-  status: 'active' | 'completed' | 'paused';
+  status: "active" | "completed" | "paused";
   deadline: string;
   createdAt: string;
 }
@@ -30,18 +29,18 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
 
   fetchCollections: async () => {
     set({ loading: true, error: null });
-    
+
     try {
       const { data: collectionsData, error } = await supabase
-        .from('collections')
-        .select(`
-          *,
-          profiles!collections_organizer_id_fkey (
-            full_name
-          )
-        `)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false });
+        .from("collections")
+        .select(
+          `
+          *
+          
+        `
+        )
+        // .is("deleted_at", null)
+        .order("created_at", { ascending: false });
 
       if (error) {
         throw error;
@@ -51,40 +50,40 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
       const collectionsWithStats = await Promise.all(
         collectionsData?.map(async (collection: any) => {
           const { count } = await supabase
-            .from('contributions')
-            .select('*', { count: 'exact', head: true })
-            .eq('collection_id', collection.id)
-            .eq('status', 'paid');
+            .from("contributions")
+            .select("*", { count: "exact", head: true })
+            .eq("collection_id", collection.id)
+            .eq("status", "paid");
 
           return {
             id: collection.id,
             title: collection.title,
-            description: collection.description || '',
-            organizer: collection.profiles?.full_name || 'Unknown Organizer',
+            description: collection.description || "",
+            organizer: collection.profiles?.full_name || "Unknown Organizer",
             targetAmount: Number(collection.amount),
             raisedAmount: Number(collection.total_amount || 0),
             contributors: count || 0,
             status: collection.status,
-            deadline: collection.deadline || '',
+            deadline: collection.deadline || "",
             createdAt: collection.created_at,
           };
         }) || []
       );
-      
+
       set({
         collections: collectionsWithStats,
         loading: false,
       });
     } catch (error) {
-      console.error('Error fetching collections:', error);
+      console.error("Error fetching collections:", error);
       set({
-        error: 'Failed to load collections',
+        error: "Failed to load collections",
         loading: false,
       });
     }
   },
 
   getCollectionById: (id: string) => {
-    return get().collections.find(collection => collection.id === id);
+    return get().collections.find((collection) => collection.id === id);
   },
 }));

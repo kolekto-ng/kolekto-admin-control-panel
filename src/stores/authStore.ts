@@ -1,8 +1,7 @@
-
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { supabase } from '@/integrations/supabase/client';
-import type { User, Session } from '@supabase/supabase-js';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { supabase } from "@/integrations/supabase/client";
+import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthState {
   user: User | null;
@@ -24,7 +23,7 @@ export const useAuthStore = create<AuthState>()(
 
       signIn: async (email: string, password: string) => {
         set({ loading: true });
-        
+
         try {
           const { data, error } = await supabase.auth.signInWithPassword({
             email,
@@ -61,12 +60,14 @@ export const useAuthStore = create<AuthState>()(
 
       initialize: async () => {
         if (get().initialized) return;
-        
+
         set({ loading: true });
 
         // Get initial session
-        const { data: { session } } = await supabase.auth.getSession();
-        
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
         set({
           user: session?.user ?? null,
           session,
@@ -84,7 +85,7 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'auth-storage',
+      name: "auth-storage",
       partialize: (state) => ({
         user: state.user,
         session: state.session,
