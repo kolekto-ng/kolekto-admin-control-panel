@@ -15,10 +15,12 @@ export interface DashboardStats {
 export interface Transaction {
   id: string;
   amount: number;
-  type: string;
+  type: 'contribution' | 'withdrawal';
   description: string;
   date: string;
-  status: string;
+  status: 'success' | 'failed' | 'flagged' | 'pending';
+  user: string;
+  collection: string;
 }
 
 interface DashboardState {
@@ -46,14 +48,23 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         { data: contributionsData },
         { data: withdrawalsData },
         { count: pendingWithdrawals },
-        { data: transactionsData }
+        { data: recentContributions },
+        { data: recentWithdrawals }
       ] = await Promise.all([
         supabase.from('profiles').select('*', { count: 'exact', head: true }),
         supabase.from('collections').select('*', { count: 'exact', head: true }).is('deleted_at', null),
         supabase.from('contributions').select('amount').eq('status', 'paid'),
         supabase.from('withdrawals').select('amount, status'),
         supabase.from('withdrawals').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(10)
+        supabase.from('contributions').select(`
+          id, amount, created_at, status, contributor_name,
+          collections!inner(title)
+        `).order('created_at', { ascending: false }).limit(5),
+        supabase.from('withdrawals').select(`
+          id, amount, created_at, status,
+          profiles!withdrawals_organizer_id_fkey(full_name),
+          collections!withdrawals_collection_id_fkey(title)
+        `).order('created_at', { ascending: false }).limit(5)
       ]);
 
       // Calculate totals
@@ -73,14 +84,30 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         flaggedTransactions: 0, // This would need additional logic to determine flagged transactions
       };
 
-      const transactions: Transaction[] = transactionsData?.map((transaction: any) => ({
-        id: transaction.id,
-        amount: transaction.amount,
-        type: transaction.type,
-        description: transaction.description || `${transaction.type} transaction`,
-        date: transaction.created_at,
-        status: 'completed', // Assuming completed since they're in the transactions table
-      })) || [];
+      // Create transactions array from contributions and withdrawals
+      const transactions: Transaction[] = [
+        ...(recentContributions?.map((contribution: any) => ({
+          id: contribution.id,
+          amount: contribution.amount,
+          type: 'contribution' as const,
+          description: `Contribution to ${contribution.collections?.title || 'Unknown Collection'}`,
+          date: contribution.created_at,
+          status: contribution.status === 'paid' ? 'success' as const : 'pending' as const,
+          user: contribution.contributor_name || 'Anonymous',
+          collection: contribution.collections?.title || 'Unknown Collection',
+        })) || []),
+        ...(recentWithdrawals?.map((withdrawal: any) => ({
+          id: withdrawal.id,
+          amount: withdrawal.amount,
+          type: 'withdrawal' as const,
+          description: `Withdrawal from ${withdrawal.collections?.title || 'Unknown Collection'}`,
+          date: withdrawal.created_at,
+          status: withdrawal.status === 'approved' ? 'success' as const : 
+                  withdrawal.status === 'rejected' ? 'failed' as const : 'pending' as const,
+          user: withdrawal.profiles?.full_name || 'Unknown User',
+          collection: withdrawal.collections?.title || 'Unknown Collection',
+        })) || [])
+      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 10);
       
       set({
         stats,
