@@ -1,49 +1,39 @@
 
 import { useState, useEffect } from 'react';
-import { User, fetchUsers } from '@/services/mockData';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Search, UserRound } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatDate } from '@/lib/formatters';
-import { cn } from '@/lib/utils';
 import { Link } from 'react-router-dom';
+import { useUsersStore } from '@/stores/usersStore';
 
 const UsersPage = () => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { users, loading, error, fetchUsers } = useUsersStore();
+  const [filteredUsers, setFilteredUsers] = useState(users);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        setLoading(true);
-        const userData = await fetchUsers();
-        setUsers(userData);
-        setFilteredUsers(userData);
-      } catch (error) {
-        console.error('Failed to load users:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load users. Please try again.',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+    fetchUsers();
+  }, [fetchUsers]);
 
-    loadUsers();
-  }, [toast]);
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: 'Error',
+        description: error,
+        variant: 'destructive',
+      });
+    }
+  }, [error, toast]);
 
   useEffect(() => {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       setFilteredUsers(users.filter(user => 
-        user.fullName.toLowerCase().includes(term) ||
+        user.name.toLowerCase().includes(term) ||
         user.email.toLowerCase().includes(term) ||
         user.phone.includes(term)
       ));
@@ -52,14 +42,14 @@ const UsersPage = () => {
     }
   }, [searchTerm, users]);
 
-  const getUserStatusBadge = (status: User['status']) => {
+  const getUserStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
         return <Badge variant="outline" className="bg-status-success/15 text-status-success">Active</Badge>;
-      case 'suspended':
-        return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Suspended</Badge>;
-      case 'flagged':
-        return <Badge variant="outline" className="bg-status-error/15 text-status-error">Flagged</Badge>;
+      case 'inactive':
+        return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Inactive</Badge>;
+      default:
+        return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">{status}</Badge>;
     }
   };
 
@@ -117,12 +107,12 @@ const UsersPage = () => {
                         <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
                           <UserRound className="w-4 h-4 text-gray-500" />
                         </div>
-                        <div className="font-medium">{user.fullName}</div>
+                        <div className="font-medium">{user.name}</div>
                       </td>
                       <td>{user.email}</td>
                       <td>{user.phone}</td>
-                      <td>{user.collectionsCreated}</td>
-                      <td>{formatDate(user.dateJoined)}</td>
+                      <td>{user.collections}</td>
+                      <td>{formatDate(user.joinDate)}</td>
                       <td>{getUserStatusBadge(user.status)}</td>
                       <td>
                         <Button variant="ghost" size="sm" asChild>

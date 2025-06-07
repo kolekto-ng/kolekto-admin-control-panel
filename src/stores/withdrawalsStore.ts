@@ -4,16 +4,12 @@ import { create } from 'zustand';
 export interface Withdrawal {
   id: string;
   collectionId: string;
-  collectionTitle: string;
-  organizer: string;
-  amount: number;
+  collectionName: string;
+  hostName: string;
+  hostEmail: string;
+  requestedAmount: number;
+  dateRequested: string;
   status: 'pending' | 'approved' | 'rejected';
-  bankName: string;
-  accountNumber: string;
-  accountName: string;
-  requestDate: string;
-  processedDate?: string;
-  reason?: string;
 }
 
 interface WithdrawalsState {
@@ -22,7 +18,6 @@ interface WithdrawalsState {
   error: string | null;
   fetchWithdrawals: () => Promise<void>;
   getWithdrawalById: (id: string) => Withdrawal | undefined;
-  updateWithdrawalStatus: (id: string, status: 'approved' | 'rejected', reason?: string) => Promise<void>;
 }
 
 export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
@@ -41,14 +36,22 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
         {
           id: '1',
           collectionId: '1',
-          collectionTitle: 'Medical Fund for Sarah',
-          organizer: 'John Doe',
-          amount: 100000,
-          status: 'pending',
-          bankName: 'First Bank',
-          accountNumber: '1234567890',
-          accountName: 'John Doe',
-          requestDate: '2024-01-20'
+          collectionName: 'Medical Fund for Sarah',
+          hostName: 'John Doe',
+          hostEmail: 'john@example.com',
+          requestedAmount: 250000,
+          dateRequested: '2024-01-20',
+          status: 'pending'
+        },
+        {
+          id: '2',
+          collectionId: '2',
+          collectionName: 'School Building Project',
+          hostName: 'Jane Smith',
+          hostEmail: 'jane@example.com',
+          requestedAmount: 500000,
+          dateRequested: '2024-01-18',
+          status: 'approved'
         },
         // Add more mock withdrawals as needed
       ];
@@ -67,35 +70,5 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
 
   getWithdrawalById: (id: string) => {
     return get().withdrawals.find(withdrawal => withdrawal.id === id);
-  },
-
-  updateWithdrawalStatus: async (id: string, status: 'approved' | 'rejected', reason?: string) => {
-    set({ loading: true });
-    
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const withdrawals = get().withdrawals.map(withdrawal =>
-        withdrawal.id === id
-          ? {
-              ...withdrawal,
-              status,
-              processedDate: new Date().toISOString(),
-              reason,
-            }
-          : withdrawal
-      );
-      
-      set({
-        withdrawals,
-        loading: false,
-      });
-    } catch (error) {
-      set({
-        error: 'Failed to update withdrawal status',
-        loading: false,
-      });
-    }
   },
 }));

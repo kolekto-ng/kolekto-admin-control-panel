@@ -1,21 +1,13 @@
 
 import { useState, useEffect } from 'react';
-import { Withdrawal, fetchWithdrawals } from '@/services/mockData';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDate } from '@/lib/formatters';
-import { cn } from '@/lib/utils';
 import { Link } from 'react-router-dom';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useWithdrawalsStore } from '@/stores/withdrawalsStore';
 import {
   Tabs,
   TabsContent,
@@ -24,34 +16,25 @@ import {
 } from "@/components/ui/tabs";
 
 const WithdrawalsPage = () => {
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [filteredWithdrawals, setFilteredWithdrawals] = useState<Withdrawal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { withdrawals, loading, error, fetchWithdrawals } = useWithdrawalsStore();
+  const [filteredWithdrawals, setFilteredWithdrawals] = useState(withdrawals);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentTab, setCurrentTab] = useState('all');
   const { toast } = useToast();
 
   useEffect(() => {
-    const loadWithdrawals = async () => {
-      try {
-        setLoading(true);
-        const data = await fetchWithdrawals();
-        setWithdrawals(data);
-        setFilteredWithdrawals(data);
-      } catch (error) {
-        console.error('Failed to load withdrawals:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load withdrawal requests. Please try again.',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+    fetchWithdrawals();
+  }, [fetchWithdrawals]);
 
-    loadWithdrawals();
-  }, [toast]);
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: 'Error',
+        description: error,
+        variant: 'destructive',
+      });
+    }
+  }, [error, toast]);
 
   useEffect(() => {
     let filtered = withdrawals;
@@ -74,7 +57,7 @@ const WithdrawalsPage = () => {
     setFilteredWithdrawals(filtered);
   }, [searchTerm, currentTab, withdrawals]);
 
-  const getStatusBadge = (status: Withdrawal['status']) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
         return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Pending</Badge>;
@@ -82,6 +65,8 @@ const WithdrawalsPage = () => {
         return <Badge variant="outline" className="bg-status-success/15 text-status-success">Approved</Badge>;
       case 'rejected':
         return <Badge variant="outline" className="bg-status-error/15 text-status-error">Rejected</Badge>;
+      default:
+        return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">{status}</Badge>;
     }
   };
 
