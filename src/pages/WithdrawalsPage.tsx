@@ -1,21 +1,12 @@
-
 import { useState, useEffect } from 'react';
-import { Withdrawal, fetchWithdrawals } from '@/services/mockData';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDate } from '@/lib/formatters';
-import { cn } from '@/lib/utils';
 import { Link } from 'react-router-dom';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useWithdrawalsStore } from '@/stores/withdrawalsStore';
 import {
   Tabs,
   TabsContent,
@@ -24,34 +15,26 @@ import {
 } from "@/components/ui/tabs";
 
 const WithdrawalsPage = () => {
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [filteredWithdrawals, setFilteredWithdrawals] = useState<Withdrawal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { withdrawals, loading, error, fetchWithdrawals, approveWithdrawal, rejectWithdrawal } = useWithdrawalsStore();
+  const [filteredWithdrawals, setFilteredWithdrawals] = useState(withdrawals);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentTab, setCurrentTab] = useState('all');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    const loadWithdrawals = async () => {
-      try {
-        setLoading(true);
-        const data = await fetchWithdrawals();
-        setWithdrawals(data);
-        setFilteredWithdrawals(data);
-      } catch (error) {
-        console.error('Failed to load withdrawals:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load withdrawal requests. Please try again.',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+    fetchWithdrawals();
+  }, [fetchWithdrawals]);
 
-    loadWithdrawals();
-  }, [toast]);
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: 'Error',
+        description: error,
+        variant: 'destructive',
+      });
+    }
+  }, [error, toast]);
 
   useEffect(() => {
     let filtered = withdrawals;
@@ -65,7 +48,7 @@ const WithdrawalsPage = () => {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(withdrawal => 
-        withdrawal.collectionName.toLowerCase().includes(term) ||
+        withdrawal.collectionName?.toLowerCase().includes(term) ||
         withdrawal.hostName.toLowerCase().includes(term) ||
         withdrawal.hostEmail.toLowerCase().includes(term)
       );
@@ -74,7 +57,7 @@ const WithdrawalsPage = () => {
     setFilteredWithdrawals(filtered);
   }, [searchTerm, currentTab, withdrawals]);
 
-  const getStatusBadge = (status: Withdrawal['status']) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
         return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Pending</Badge>;
@@ -82,21 +65,47 @@ const WithdrawalsPage = () => {
         return <Badge variant="outline" className="bg-status-success/15 text-status-success">Approved</Badge>;
       case 'rejected':
         return <Badge variant="outline" className="bg-status-error/15 text-status-error">Rejected</Badge>;
+      default:
+        return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">{status}</Badge>;
     }
   };
 
-  const handleApprove = (id: string) => {
-    toast({
-      title: "Withdrawal Approved",
-      description: `Withdrawal request ${id} has been approved.`,
-    });
+  const handleApprove = async (id: string) => {
+    setActionLoading(id);
+    try {
+      await approveWithdrawal(id);
+      toast({
+        title: "Withdrawal Approved",
+        description: `Withdrawal request has been approved.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to approve withdrawal request.",
+        variant: "destructive",
+      });
+    } finally {
+      setActionLoading(null);
+    }
   };
 
-  const handleReject = (id: string) => {
-    toast({
-      title: "Withdrawal Rejected",
-      description: `Withdrawal request ${id} has been rejected.`,
-    });
+  const handleReject = async (id: string) => {
+    setActionLoading(id);
+    try {
+      await rejectWithdrawal(id);
+      toast({
+        title: "Withdrawal Rejected",
+        description: `Withdrawal request has been rejected.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to reject withdrawal request.",
+        variant: "destructive",
+      });
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const getTabCount = (status: string) => {
@@ -116,7 +125,6 @@ const WithdrawalsPage = () => {
         <Button variant="outline">Export Withdrawals</Button>
       </div>
 
-      {/* Tabs and search */}
       <div className="space-y-4">
         <Tabs defaultValue="all" value={currentTab} onValueChange={setCurrentTab}>
           <TabsList>
@@ -146,7 +154,6 @@ const WithdrawalsPage = () => {
         </div>
       </div>
 
-      {/* Withdrawals Table */}
       <div className="bg-white rounded-lg border shadow-sm">
         {loading ? (
           <div className="flex items-center justify-center h-64">
@@ -187,16 +194,26 @@ const WithdrawalsPage = () => {
                                 variant="outline" 
                                 className="border-green-500 text-green-600 hover:bg-green-50"
                                 onClick={() => handleApprove(withdrawal.id)}
+                                disabled={actionLoading === withdrawal.id}
                               >
-                                Approve
+                                {actionLoading === withdrawal.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  'Approve'
+                                )}
                               </Button>
                               <Button 
                                 size="sm" 
                                 variant="outline" 
                                 className="border-red-500 text-red-600 hover:bg-red-50"
                                 onClick={() => handleReject(withdrawal.id)}
+                                disabled={actionLoading === withdrawal.id}
                               >
-                                Reject
+                                {actionLoading === withdrawal.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  'Reject'
+                                )}
                               </Button>
                             </>
                           )}

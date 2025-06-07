@@ -1,14 +1,13 @@
 
 import { useState, useEffect } from 'react';
-import { Collection, fetchCollections } from '@/services/mockData';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDate } from '@/lib/formatters';
-import { cn } from '@/lib/utils';
 import { Link } from 'react-router-dom';
+import { useCollectionsStore } from '@/stores/collectionsStore';
 import {
   Select,
   SelectContent,
@@ -18,34 +17,25 @@ import {
 } from "@/components/ui/select";
 
 const CollectionsPage = () => {
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [filteredCollections, setFilteredCollections] = useState<Collection[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { collections, loading, error, fetchCollections } = useCollectionsStore();
+  const [filteredCollections, setFilteredCollections] = useState(collections);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const { toast } = useToast();
 
   useEffect(() => {
-    const loadCollections = async () => {
-      try {
-        setLoading(true);
-        const data = await fetchCollections();
-        setCollections(data);
-        setFilteredCollections(data);
-      } catch (error) {
-        console.error('Failed to load collections:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load collections. Please try again.',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+    fetchCollections();
+  }, [fetchCollections]);
 
-    loadCollections();
-  }, [toast]);
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: 'Error',
+        description: error,
+        variant: 'destructive',
+      });
+    }
+  }, [error, toast]);
 
   useEffect(() => {
     let filtered = collections;
@@ -55,8 +45,7 @@ const CollectionsPage = () => {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(collection => 
         collection.title.toLowerCase().includes(term) ||
-        collection.hostName.toLowerCase().includes(term) ||
-        collection.hostEmail.toLowerCase().includes(term)
+        collection.organizer.toLowerCase().includes(term)
       );
     }
 
@@ -68,14 +57,16 @@ const CollectionsPage = () => {
     setFilteredCollections(filtered);
   }, [searchTerm, statusFilter, collections]);
 
-  const getStatusBadge = (status: Collection['status']) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
         return <Badge variant="outline" className="bg-status-success/15 text-status-success">Active</Badge>;
       case 'completed':
         return <Badge variant="outline" className="bg-status-info/15 text-status-info">Completed</Badge>;
-      case 'closed':
-        return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">Closed</Badge>;
+      case 'paused':
+        return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">Paused</Badge>;
+      default:
+        return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">{status}</Badge>;
     }
   };
 
@@ -112,7 +103,7 @@ const CollectionsPage = () => {
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
+              <SelectItem value="paused">Paused</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -131,7 +122,7 @@ const CollectionsPage = () => {
               <thead>
                 <tr>
                   <th>Title</th>
-                  <th>Host</th>
+                  <th>Organizer</th>
                   <th>Amount Raised</th>
                   <th>Contributors</th>
                   <th>Status</th>
@@ -145,13 +136,12 @@ const CollectionsPage = () => {
                     <tr key={collection.id} className="hover:bg-muted/50">
                       <td className="py-3 font-medium">{collection.title}</td>
                       <td>
-                        <div>{collection.hostName}</div>
-                        <div className="text-xs text-muted-foreground">{collection.hostEmail}</div>
+                        <div>{collection.organizer}</div>
                       </td>
-                      <td>{formatCurrency(collection.amountRaised)}</td>
-                      <td>{collection.totalContributors}</td>
+                      <td>{formatCurrency(collection.raisedAmount)}</td>
+                      <td>{collection.contributors}</td>
                       <td>{getStatusBadge(collection.status)}</td>
-                      <td>{formatDate(collection.dateCreated)}</td>
+                      <td>{formatDate(collection.createdAt)}</td>
                       <td>
                         <Button variant="ghost" size="sm" asChild>
                           <Link to={`/collections/${collection.id}`}>View</Link>

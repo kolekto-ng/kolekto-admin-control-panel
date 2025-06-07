@@ -1,7 +1,7 @@
 
 import { formatCurrency } from '@/lib/formatters';
 import { formatDistance } from 'date-fns';
-import { Transaction } from '@/services/mockData';
+import { Transaction } from '@/stores/dashboardStore';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
