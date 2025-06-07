@@ -21,6 +21,18 @@ interface UsersState {
   getUserById: (id: string) => User | undefined;
 }
 
+// Demo user data
+const demoUser: User = {
+  id: 'demo-user-001',
+  name: 'John Doe',
+  email: 'john.doe@demo.com',
+  phone: '+234 801 234 5678',
+  joinDate: new Date().toISOString(),
+  collections: 3,
+  totalRaised: 125000,
+  status: 'active'
+};
+
 export const useUsersStore = create<UsersState>((set, get) => ({
   users: [],
   loading: false,
@@ -39,57 +51,61 @@ export const useUsersStore = create<UsersState>((set, get) => ({
         throw error;
       }
 
-      if (!profilesData) {
-        set({ users: [], loading: false });
-        return;
+      let usersWithStats: User[] = [];
+
+      if (profilesData && profilesData.length > 0) {
+        // Get collection stats for each user
+        usersWithStats = await Promise.all(
+          profilesData.map(async (profile) => {
+            // Get collections count
+            const { count: collectionsCount } = await supabase
+              .from('collections')
+              .select('*', { count: 'exact', head: true })
+              .eq('user_id', profile.id);
+
+            // Get total raised amount from wallets (net_payment represents actual collected amount)
+            const { data: walletsData } = await supabase
+              .from('wallets')
+              .select('net_payment, collection_id')
+              .in('collection_id', 
+                await supabase
+                  .from('collections')
+                  .select('id')
+                  .eq('user_id', profile.id)
+                  .then(({ data }) => data?.map(c => c.id) || [])
+              );
+
+            const totalRaised = walletsData?.reduce((sum, wallet) => 
+              sum + (Number(wallet.net_payment) || 0), 0
+            ) || 0;
+
+            return {
+              id: profile.id,
+              name: profile.full_name || 'Unknown User',
+              email: profile.email,
+              phone: profile.phone_number || '',
+              joinDate: profile.created_at || '',
+              collections: collectionsCount || 0,
+              totalRaised,
+              status: 'active' as const,
+            };
+          })
+        );
       }
 
-      // Get collection stats for each user
-      const usersWithStats = await Promise.all(
-        profilesData.map(async (profile) => {
-          // Get collections count
-          const { count: collectionsCount } = await supabase
-            .from('collections')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', profile.id);
-
-          // Get total raised amount from wallets (net_payment represents actual collected amount)
-          const { data: walletsData } = await supabase
-            .from('wallets')
-            .select('net_payment, collection_id')
-            .in('collection_id', 
-              await supabase
-                .from('collections')
-                .select('id')
-                .eq('user_id', profile.id)
-                .then(({ data }) => data?.map(c => c.id) || [])
-            );
-
-          const totalRaised = walletsData?.reduce((sum, wallet) => 
-            sum + (Number(wallet.net_payment) || 0), 0
-          ) || 0;
-
-          return {
-            id: profile.id,
-            name: profile.full_name || 'Unknown User',
-            email: profile.email,
-            phone: profile.phone_number || '',
-            joinDate: profile.created_at || '',
-            collections: collectionsCount || 0,
-            totalRaised,
-            status: 'active' as const,
-          };
-        })
-      );
+      // Add demo user to the beginning of the list
+      const allUsers = [demoUser, ...usersWithStats];
       
       set({
-        users: usersWithStats,
+        users: allUsers,
         loading: false,
       });
     } catch (error) {
       console.error('Error fetching users:', error);
+      // If there's an error, still show the demo user
       set({
-        error: 'Failed to load users',
+        users: [demoUser],
+        error: 'Failed to load users from database, showing demo data',
         loading: false,
       });
     }
