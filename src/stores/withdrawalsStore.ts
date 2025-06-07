@@ -1,6 +1,7 @@
-
-import { create } from 'zustand';
-import { supabase } from '@/integrations/supabase/client';
+import { create } from "zustand";
+import { supabase } from "@/integrations/supabase/client";
+import { axiosInstance } from "../lib/axios";
+import { log } from "console";
 
 export interface Withdrawal {
   id: string;
@@ -10,7 +11,7 @@ export interface Withdrawal {
   hostEmail: string;
   requestedAmount: number;
   dateRequested: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: "pending" | "approved" | "rejected";
   bankName: string;
   accountNumber: string;
   accountName: string;
@@ -33,11 +34,12 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
 
   fetchWithdrawals: async () => {
     set({ loading: true, error: null });
-    
+
     try {
       const { data: withdrawalsData, error } = await supabase
-        .from('withdrawals')
-        .select(`
+        .from("withdrawals")
+        .select(
+          `
           *,
           collections (
             title,
@@ -47,87 +49,98 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
             full_name,
             email
           )
-        `)
-        .order('created_at', { ascending: false });
+        `
+        )
+        .order("created_at", { ascending: false });
 
       if (error) {
         throw error;
       }
 
-      const formattedWithdrawals: Withdrawal[] = withdrawalsData?.map((withdrawal: any) => ({
-        id: withdrawal.id,
-        collectionId: withdrawal.collection_id,
-        collectionName: withdrawal.collections?.title || 'Unknown Collection',
-        hostName: withdrawal.profiles?.full_name || 'Unknown Host',
-        hostEmail: withdrawal.profiles?.email || 'unknown@example.com',
-        requestedAmount: withdrawal.amount,
-        dateRequested: withdrawal.created_at,
-        status: withdrawal.status,
-        bankName: withdrawal.bank_name,
-        accountNumber: withdrawal.account_number,
-        accountName: withdrawal.account_name,
-      })) || [];
-      
+      const formattedWithdrawals: Withdrawal[] =
+        withdrawalsData?.map((withdrawal: any) => ({
+          id: withdrawal.id,
+          collectionId: withdrawal.collection_id,
+          collectionName: withdrawal.collections?.title || "Unknown Collection",
+          hostName: withdrawal.profiles?.full_name || "Unknown Host",
+          hostEmail: withdrawal.profiles?.email || "unknown@example.com",
+          requestedAmount: withdrawal.amount,
+          dateRequested: withdrawal.created_at,
+          status: withdrawal.status,
+          bankName: withdrawal.bank_name,
+          accountNumber: withdrawal.account_number,
+          accountName: withdrawal.account_name,
+        })) || [];
+
       set({
         withdrawals: formattedWithdrawals,
         loading: false,
       });
     } catch (error) {
-      console.error('Error fetching withdrawals:', error);
+      console.error("Error fetching withdrawals:", error);
       set({
-        error: 'Failed to load withdrawals',
+        error: "Failed to load withdrawals",
         loading: false,
       });
     }
   },
 
   getWithdrawalById: (id: string) => {
-    return get().withdrawals.find(withdrawal => withdrawal.id === id);
+    return get().withdrawals.find((withdrawal) => withdrawal.id === id);
   },
 
   approveWithdrawal: async (id: string) => {
     try {
-      const { error } = await supabase
-        .from('withdrawals')
-        .update({ status: 'approved' })
-        .eq('id', id);
+      console.log("Approving withdrawal with ID:", id);
+      // Call the API to approve the withdrawal
+      await axiosInstance.post("/withdrawals/approve", { id });
+      // Update the withdrawal status in the database
 
-      if (error) {
-        throw error;
-      }
+      // const { error } = await supabase
+      //   .from("withdrawals")
+      //   .update({ status: "approved" })
+      //   .eq("id", id);
+
+      // if (error) {
+      //   throw error;
+      // }
 
       // Update local state
-      set(state => ({
-        withdrawals: state.withdrawals.map(withdrawal =>
-          withdrawal.id === id ? { ...withdrawal, status: 'approved' as const } : withdrawal
-        )
-      }));
+      // set((state) => ({
+      //   withdrawals: state.withdrawals.map((withdrawal) =>
+      //     withdrawal.id === id
+      //       ? { ...withdrawal, status: "approved" as const }
+      //       : withdrawal
+      //   ),
+      // }));
     } catch (error) {
-      console.error('Error approving withdrawal:', error);
-      set({ error: 'Failed to approve withdrawal' });
+      console.error("Error approving withdrawal:", error);
+      set({ error: "Failed to approve withdrawal" });
     }
   },
 
   rejectWithdrawal: async (id: string) => {
     try {
       const { error } = await supabase
-        .from('withdrawals')
-        .update({ status: 'rejected' })
-        .eq('id', id);
+        .from("withdrawals")
+        .update({ status: "rejected" })
+        .eq("id", id);
 
       if (error) {
         throw error;
       }
 
       // Update local state
-      set(state => ({
-        withdrawals: state.withdrawals.map(withdrawal =>
-          withdrawal.id === id ? { ...withdrawal, status: 'rejected' as const } : withdrawal
-        )
+      set((state) => ({
+        withdrawals: state.withdrawals.map((withdrawal) =>
+          withdrawal.id === id
+            ? { ...withdrawal, status: "rejected" as const }
+            : withdrawal
+        ),
       }));
     } catch (error) {
-      console.error('Error rejecting withdrawal:', error);
-      set({ error: 'Failed to reject withdrawal' });
+      console.error("Error rejecting withdrawal:", error);
+      set({ error: "Failed to reject withdrawal" });
     }
   },
 }));
