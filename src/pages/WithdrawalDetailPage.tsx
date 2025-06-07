@@ -6,43 +6,26 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDate, formatCurrency } from '@/lib/formatters';
-import { Withdrawal, fetchWithdrawals } from '@/services/mockData';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Separator } from '@/components/ui/separator';
+import { useWithdrawalsStore } from '@/stores/withdrawalsStore';
 
 const WithdrawalDetailPage = () => {
   const { id } = useParams();
-  const [withdrawal, setWithdrawal] = useState<Withdrawal | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { withdrawals, loading, fetchWithdrawals, approveWithdrawal, rejectWithdrawal, getWithdrawalById } = useWithdrawalsStore();
+  const [actionLoading, setActionLoading] = useState(false);
   const { toast } = useToast();
 
+  const withdrawal = id ? getWithdrawalById(id) : null;
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const withdrawalsData = await fetchWithdrawals();
-        const foundWithdrawal = withdrawalsData.find(w => w.id === id);
-        
-        if (foundWithdrawal) {
-          setWithdrawal(foundWithdrawal);
-        }
-      } catch (error) {
-        console.error('Failed to load withdrawal data:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load withdrawal data. Please try again.',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (withdrawals.length === 0) {
+      fetchWithdrawals();
+    }
+  }, [fetchWithdrawals, withdrawals.length]);
 
-    loadData();
-  }, [id, toast]);
-
-  const getStatusBadge = (status: Withdrawal['status']) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
         return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Pending</Badge>;
@@ -50,27 +33,51 @@ const WithdrawalDetailPage = () => {
         return <Badge variant="outline" className="bg-status-success/15 text-status-success">Approved</Badge>;
       case 'rejected':
         return <Badge variant="outline" className="bg-status-error/15 text-status-error">Rejected</Badge>;
+      default:
+        return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">{status}</Badge>;
     }
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!withdrawal) return;
     
-    setWithdrawal({...withdrawal, status: 'approved'});
-    toast({
-      title: 'Withdrawal Approved',
-      description: `The withdrawal request for ${formatCurrency(withdrawal.requestedAmount)} has been approved.`,
-    });
+    setActionLoading(true);
+    try {
+      await approveWithdrawal(withdrawal.id);
+      toast({
+        title: 'Withdrawal Approved',
+        description: `The withdrawal request for ${formatCurrency(withdrawal.requestedAmount)} has been approved.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to approve withdrawal request.',
+        variant: 'destructive',
+      });
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-  const handleReject = () => {
+  const handleReject = async () => {
     if (!withdrawal) return;
     
-    setWithdrawal({...withdrawal, status: 'rejected'});
-    toast({
-      title: 'Withdrawal Rejected',
-      description: `The withdrawal request for ${formatCurrency(withdrawal.requestedAmount)} has been rejected.`,
-    });
+    setActionLoading(true);
+    try {
+      await rejectWithdrawal(withdrawal.id);
+      toast({
+        title: 'Withdrawal Rejected',
+        description: `The withdrawal request for ${formatCurrency(withdrawal.requestedAmount)} has been rejected.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to reject withdrawal request.',
+        variant: 'destructive',
+      });
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   if (loading) {
@@ -94,13 +101,6 @@ const WithdrawalDetailPage = () => {
     );
   }
 
-  // Mock bank details
-  const bankDetails = {
-    bankName: 'First Bank of Nigeria',
-    accountName: withdrawal.hostName,
-    accountNumber: '3010' + Math.floor(Math.random() * 10000000).toString().padStart(6, '0'),
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -120,15 +120,19 @@ const WithdrawalDetailPage = () => {
                 variant="outline" 
                 className="border-status-error text-status-error hover:bg-status-error/5"
                 onClick={handleReject}
+                disabled={actionLoading}
               >
-                <X className="h-4 w-4 mr-1" /> Reject
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <X className="h-4 w-4 mr-1" />} 
+                Reject
               </Button>
               <Button 
                 variant="outline" 
                 className="border-status-success text-status-success hover:bg-status-success/5"
                 onClick={handleApprove}
+                disabled={actionLoading}
               >
-                <Check className="h-4 w-4 mr-1" /> Approve
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />} 
+                Approve
               </Button>
             </>
           )}
@@ -191,17 +195,17 @@ const WithdrawalDetailPage = () => {
           <CardContent className="space-y-4">
             <div>
               <div className="text-sm text-muted-foreground">Bank Name</div>
-              <div className="font-medium">{bankDetails.bankName}</div>
+              <div className="font-medium">{withdrawal.bankName}</div>
             </div>
             
             <div>
               <div className="text-sm text-muted-foreground">Account Name</div>
-              <div className="font-medium">{bankDetails.accountName}</div>
+              <div className="font-medium">{withdrawal.accountName}</div>
             </div>
             
             <div>
               <div className="text-sm text-muted-foreground">Account Number</div>
-              <div className="font-medium">{bankDetails.accountNumber}</div>
+              <div className="font-medium">{withdrawal.accountNumber}</div>
             </div>
             
             <Separator />

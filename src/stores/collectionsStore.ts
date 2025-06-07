@@ -1,5 +1,6 @@
 
 import { create } from 'zustand';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface Collection {
   id: string;
@@ -31,30 +32,51 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
     set({ loading: true, error: null });
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const mockCollections: Collection[] = [
-        {
-          id: '1',
-          title: 'Medical Fund for Sarah',
-          description: 'Help Sarah with her medical expenses',
-          organizer: 'John Doe',
-          targetAmount: 500000,
-          raisedAmount: 325000,
-          contributors: 45,
-          status: 'active',
-          deadline: '2024-12-31',
-          createdAt: '2024-01-15'
-        },
-        // Add more mock collections as needed
-      ];
+      const { data: collectionsData, error } = await supabase
+        .from('collections')
+        .select(`
+          *,
+          profiles!collections_organizer_id_fkey (
+            full_name
+          )
+        `)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      // Get contributors count for each collection
+      const collectionsWithStats = await Promise.all(
+        collectionsData?.map(async (collection: any) => {
+          const { count } = await supabase
+            .from('contributions')
+            .select('*', { count: 'exact', head: true })
+            .eq('collection_id', collection.id)
+            .eq('status', 'paid');
+
+          return {
+            id: collection.id,
+            title: collection.title,
+            description: collection.description || '',
+            organizer: collection.profiles?.full_name || 'Unknown Organizer',
+            targetAmount: Number(collection.amount),
+            raisedAmount: Number(collection.total_amount || 0),
+            contributors: count || 0,
+            status: collection.status,
+            deadline: collection.deadline || '',
+            createdAt: collection.created_at,
+          };
+        }) || []
+      );
       
       set({
-        collections: mockCollections,
+        collections: collectionsWithStats,
         loading: false,
       });
     } catch (error) {
+      console.error('Error fetching collections:', error);
       set({
         error: 'Failed to load collections',
         loading: false,

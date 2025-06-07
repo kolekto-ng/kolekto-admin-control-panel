@@ -1,5 +1,6 @@
 
 import { create } from 'zustand';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface User {
   id: string;
@@ -29,28 +30,55 @@ export const useUsersStore = create<UsersState>((set, get) => ({
     set({ loading: true, error: null });
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const mockUsers: User[] = [
-        {
-          id: '1',
-          name: 'John Doe',
-          email: 'john@example.com',
-          phone: '+234 801 234 5678',
-          joinDate: '2024-01-15',
-          collections: 3,
-          totalRaised: 150000,
-          status: 'active'
-        },
-        // Add more mock users as needed
-      ];
+      const { data: profilesData, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      // Get collection stats for each user
+      const usersWithStats = await Promise.all(
+        profilesData?.map(async (profile: any) => {
+          // Get collections count
+          const { count: collectionsCount } = await supabase
+            .from('collections')
+            .select('*', { count: 'exact', head: true })
+            .eq('organizer_id', profile.id)
+            .is('deleted_at', null);
+
+          // Get total raised amount
+          const { data: collectionsData } = await supabase
+            .from('collections')
+            .select('total_amount')
+            .eq('organizer_id', profile.id)
+            .is('deleted_at', null);
+
+          const totalRaised = collectionsData?.reduce((sum, collection) => 
+            sum + (Number(collection.total_amount) || 0), 0
+          ) || 0;
+
+          return {
+            id: profile.id,
+            name: profile.full_name,
+            email: profile.email,
+            phone: profile.phone_number || '',
+            joinDate: profile.created_at,
+            collections: collectionsCount || 0,
+            totalRaised,
+            status: 'active' as const, // We don't have an inactive status in the schema yet
+          };
+        }) || []
+      );
       
       set({
-        users: mockUsers,
+        users: usersWithStats,
         loading: false,
       });
     } catch (error) {
+      console.error('Error fetching users:', error);
       set({
         error: 'Failed to load users',
         loading: false,
