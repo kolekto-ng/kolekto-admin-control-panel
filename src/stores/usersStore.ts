@@ -39,38 +39,47 @@ export const useUsersStore = create<UsersState>((set, get) => ({
         throw error;
       }
 
+      if (!profilesData) {
+        set({ users: [], loading: false });
+        return;
+      }
+
       // Get collection stats for each user
       const usersWithStats = await Promise.all(
-        profilesData?.map(async (profile: any) => {
+        profilesData.map(async (profile) => {
           // Get collections count
           const { count: collectionsCount } = await supabase
             .from('collections')
             .select('*', { count: 'exact', head: true })
-            .eq('organizer_id', profile.id)
-            .is('deleted_at', null);
+            .eq('user_id', profile.id);
 
-          // Get total raised amount
-          const { data: collectionsData } = await supabase
-            .from('collections')
-            .select('total_amount')
-            .eq('organizer_id', profile.id)
-            .is('deleted_at', null);
+          // Get total raised amount from wallets (net_payment represents actual collected amount)
+          const { data: walletsData } = await supabase
+            .from('wallets')
+            .select('net_payment, collection_id')
+            .in('collection_id', 
+              await supabase
+                .from('collections')
+                .select('id')
+                .eq('user_id', profile.id)
+                .then(({ data }) => data?.map(c => c.id) || [])
+            );
 
-          const totalRaised = collectionsData?.reduce((sum, collection) => 
-            sum + (Number(collection.total_amount) || 0), 0
+          const totalRaised = walletsData?.reduce((sum, wallet) => 
+            sum + (Number(wallet.net_payment) || 0), 0
           ) || 0;
 
           return {
             id: profile.id,
-            name: profile.full_name,
+            name: profile.full_name || 'Unknown User',
             email: profile.email,
             phone: profile.phone_number || '',
-            joinDate: profile.created_at,
+            joinDate: profile.created_at || '',
             collections: collectionsCount || 0,
             totalRaised,
-            status: 'active' as const, // We don't have an inactive status in the schema yet
+            status: 'active' as const,
           };
-        }) || []
+        })
       );
       
       set({
