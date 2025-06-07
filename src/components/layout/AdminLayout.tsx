@@ -1,35 +1,27 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { Loader2 } from 'lucide-react';
+import { useAuthStore } from '@/stores/authStore';
 
 export const AdminLayout = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const navigate = useNavigate();
+  const { user, loading, initialized, initialize } = useAuthStore();
 
   useEffect(() => {
-    // Check if user is logged in
-    const checkAuth = () => {
-      // In a real app, this would check session storage, cookies, or an API
-      const fakeAuthDelay = setTimeout(() => {
-        const isLoggedIn = localStorage.getItem('kolekto-admin-auth') === 'true';
-        setIsAuthenticated(isLoggedIn);
-        
-        if (!isLoggedIn) {
-          navigate('/login');
-        }
-      }, 500);
-      
-      return () => clearTimeout(fakeAuthDelay);
-    };
-    
-    checkAuth();
-  }, [navigate]);
+    initialize();
+  }, [initialize]);
+
+  useEffect(() => {
+    if (initialized && !loading && !user) {
+      navigate('/login');
+    }
+  }, [user, loading, initialized, navigate]);
 
   // Show loading while checking auth
-  if (isAuthenticated === null) {
+  if (!initialized || loading) {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="flex flex-col items-center">
@@ -38,6 +30,10 @@ export const AdminLayout = () => {
         </div>
       </div>
     );
+  }
+
+  if (!user) {
+    return null; // Will redirect to login
   }
 
   return (

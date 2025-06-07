@@ -1,52 +1,46 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuthStore } from '@/stores/authStore';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  
+  const { signIn, loading, user, initialize } = useAuthStore();
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // For demo, hardcode admin credentials
-      if (email === 'admin@kolekto.com' && password === 'admin123') {
-        // Set authentication state in localStorage
-        localStorage.setItem('kolekto-admin-auth', 'true');
-        
-        toast({
-          title: 'Login successful',
-          description: 'Welcome to Kolekto Admin Dashboard',
-        });
-        
-        // Navigate to dashboard
-        navigate('/');
-      } else {
-        toast({
-          title: 'Login failed',
-          description: 'Invalid email or password',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+    const { error } = await signIn(email, password);
+    
+    if (error) {
       toast({
-        title: 'Error',
-        description: 'An error occurred during login. Please try again.',
+        title: 'Login failed',
+        description: error.message || 'Invalid email or password',
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
+    } else {
+      toast({
+        title: 'Login successful',
+        description: 'Welcome to Kolekto Admin Dashboard',
+      });
+      navigate('/');
     }
   };
 

@@ -1,50 +1,31 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
-import { 
-  fetchDashboardStats, 
-  fetchRecentTransactions, 
-  DashboardStats,
-  Transaction 
-} from '@/services/mockData';
 import { Loader2 } from 'lucide-react';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { RecentTransactions } from '@/components/dashboard/RecentTransactions';
 import { formatCurrency } from '@/lib/formatters';
 import { StatsSkeleton } from '@/components/dashboard/StatsSkeleton';
+import { useDashboardStore } from '@/stores/dashboardStore';
 
 const Dashboard = () => {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { stats, transactions, loading, error, fetchDashboardData } = useDashboardStore();
   const { toast } = useToast();
 
   useEffect(() => {
-    const loadDashboardData = async () => {
-      try {
-        setLoading(true);
-        const [statsData, transactionsData] = await Promise.all([
-          fetchDashboardStats(),
-          fetchRecentTransactions()
-        ]);
-        
-        setStats(statsData);
-        setTransactions(transactionsData);
-      } catch (error) {
-        console.error('Failed to load dashboard data:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load dashboard data. Please try again.',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
-    loadDashboardData();
-  }, [toast]);
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: 'Error',
+        description: error,
+        variant: 'destructive',
+      });
+    }
+  }, [error, toast]);
 
   return (
     <div className="space-y-6">
