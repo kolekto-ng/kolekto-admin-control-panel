@@ -36,6 +36,9 @@ const WithdrawalsPage = () => {
     }
   }, [error, toast]);
 
+  console.log('Withdrawals:', withdrawals);
+
+
   useEffect(() => {
     let filtered = withdrawals;
 
@@ -47,7 +50,7 @@ const WithdrawalsPage = () => {
     // Apply search filter
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(withdrawal => 
+      filtered = filtered.filter(withdrawal =>
         withdrawal.collectionName?.toLowerCase().includes(term) ||
         withdrawal.hostName.toLowerCase().includes(term) ||
         withdrawal.hostEmail.toLowerCase().includes(term)
@@ -189,9 +192,9 @@ const WithdrawalsPage = () => {
                         <div className="flex space-x-2">
                           {withdrawal.status === 'pending' && (
                             <>
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 className="border-green-500 text-green-600 hover:bg-green-50"
                                 onClick={() => handleApprove(withdrawal.id)}
                                 disabled={actionLoading === withdrawal.id}
@@ -202,9 +205,9 @@ const WithdrawalsPage = () => {
                                   'Approve'
                                 )}
                               </Button>
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 className="border-red-500 text-red-600 hover:bg-red-50"
                                 onClick={() => handleReject(withdrawal.id)}
                                 disabled={actionLoading === withdrawal.id}

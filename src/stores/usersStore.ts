@@ -96,7 +96,7 @@ export const useUsersStore = create<UsersState>((set, get) => ({
       }
 
       // Add demo user to the beginning of the list
-      const allUsers = [demoUser, ...usersWithStats];
+      const allUsers = [...usersWithStats];
 
       set({
         users: allUsers,

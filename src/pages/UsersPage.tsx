@@ -15,6 +15,9 @@ const UsersPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
+  console.log('Users:', users);
+
+
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
@@ -32,7 +35,7 @@ const UsersPage = () => {
   useEffect(() => {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      setFilteredUsers(users.filter(user => 
+      setFilteredUsers(users.filter(user =>
         user.name.toLowerCase().includes(term) ||
         user.email.toLowerCase().includes(term) ||
         user.phone.includes(term)
