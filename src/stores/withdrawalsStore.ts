@@ -70,8 +70,6 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
 
       console.log(withdrawalsWithProfiles, "withdrawalsWithProfiles");
 
-      console.log(withdrawalsData, "withdrawalsData");
-
       const formattedWithdrawals: Withdrawal[] =
         withdrawalsWithProfiles?.map((withdrawal: any) => ({
           id: withdrawal.id,
