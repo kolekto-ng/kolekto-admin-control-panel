@@ -63,7 +63,7 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
 
           return {
             ...w,
-            profile, // attach profile object
+            profile, // attach profile objec
           };
         })
       );
