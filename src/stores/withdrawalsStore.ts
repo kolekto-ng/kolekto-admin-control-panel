@@ -51,15 +51,34 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
         throw error;
       }
 
+      const withdrawalsWithProfiles = await Promise.all(
+        withdrawalsData.map(async (w) => {
+          const { data: profile, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .eq("id", w.user_id)
+            .single();
+
+          if (profileError) console.error(profileError);
+
+          return {
+            ...w,
+            profile, // attach profile object
+          };
+        })
+      );
+
+      console.log(withdrawalsWithProfiles, "withdrawalsWithProfiles");
+
       console.log(withdrawalsData, "withdrawalsData");
 
       const formattedWithdrawals: Withdrawal[] =
-        withdrawalsData?.map((withdrawal: any) => ({
+        withdrawalsWithProfiles?.map((withdrawal: any) => ({
           id: withdrawal.id,
           collectionId: withdrawal.collection_id,
           collectionName: withdrawal.collections?.title || "Unknown Collection",
-          hostName: withdrawal.profiles?.full_name || "Unknown Host",
-          hostEmail: withdrawal.profiles?.email || "unknown@example.com",
+          hostName: withdrawal.profile?.full_name || "Unknown Host",
+          hostEmail: withdrawal.profile?.email || "unknown@example.com",
           requestedAmount: withdrawal.amount,
           dateRequested: withdrawal.created_at,
           status: withdrawal.status,

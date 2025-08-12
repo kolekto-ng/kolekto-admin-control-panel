@@ -38,12 +38,13 @@ const CollectionsPage = () => {
   }, [error, toast]);
 
   useEffect(() => {
-    let filtered = collections;
+
+    let filtered = collections.collectionsWithStats || [];
 
     // Apply search filter
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(collection => 
+      filtered = filtered.filter(collection =>
         collection.title.toLowerCase().includes(term) ||
         collection.organizer.toLowerCase().includes(term)
       );

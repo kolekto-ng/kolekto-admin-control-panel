@@ -7,10 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { formatDate, formatCurrency } from '@/lib/formatters';
-import { Collection, fetchCollections } from '@/services/mockData';
+// import { Collection, fetchCollections } from '@/services/mockData';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Progress } from "@/components/ui/progress";
+import { useCollectionsStore } from '@/stores/collectionsStore';
 
 const CollectionDetailPage = () => {
   const { id } = useParams();
@@ -18,13 +19,18 @@ const CollectionDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
+  const { fetchCollections, collections } = useCollectionsStore()
+
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const collectionsData = await fetchCollections();
+        fetchCollections();
+        const collectionsData = collections.collectionsWithStats || [];
+        console.log('Fetched Collections:', collectionsData, id);
+
         const foundCollection = collectionsData.find(c => c.id === id);
-        
+
         if (foundCollection) {
           setCollection(foundCollection);
         }
@@ -124,7 +130,7 @@ const CollectionDetailPage = () => {
                   This is a fundraising collection to support {collection.title}. All funds raised will be used responsibly according to the stated purpose of this collection.
                 </p>
               </div>
-              
+
               <div className="pt-2">
                 <h3 className="font-medium mb-2">Progress</h3>
                 <div className="space-y-2">
@@ -140,12 +146,12 @@ const CollectionDetailPage = () => {
                   </div>
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2">
                 <div className="bg-muted/30 p-3 rounded-lg">
                   <div className="text-xs text-muted-foreground">Host</div>
                   <div className="font-medium mt-1">
-                    <Link to={`/users/${collection.hostName.replace(" ", "-").toLowerCase()}`} className="hover:underline">
+                    <Link to={`/users/${collection.id}`} className="hover:underline">
                       {collection.hostName}
                     </Link>
                   </div>
@@ -153,7 +159,7 @@ const CollectionDetailPage = () => {
                 </div>
                 <div className="bg-muted/30 p-3 rounded-lg">
                   <div className="text-xs text-muted-foreground">Created</div>
-                  <div className="font-medium mt-1">{formatDate(collection.dateCreated)}</div>
+                  <div className="font-medium mt-1">{formatDate(collection.createdAt)}</div>
                 </div>
                 <div className="bg-muted/30 p-3 rounded-lg">
                   <div className="text-xs text-muted-foreground">Contributors</div>
@@ -176,7 +182,7 @@ const CollectionDetailPage = () => {
               <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
               <TabsTrigger value="activity">Activity Log</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="contributors">
               <Card>
                 <CardContent className="p-0">
@@ -192,8 +198,8 @@ const CollectionDetailPage = () => {
                       {contributors.map(contributor => (
                         <tr key={contributor.id}>
                           <td>
-                            {contributor.isAnonymous ? 
-                              <span className="text-muted-foreground">Anonymous</span> : 
+                            {contributor.isAnonymous ?
+                              <span className="text-muted-foreground">Anonymous</span> :
                               contributor.name
                             }
                           </td>
@@ -206,7 +212,7 @@ const CollectionDetailPage = () => {
                 </CardContent>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="withdrawals">
               <Card>
                 <CardContent className="pt-6">
@@ -232,7 +238,7 @@ const CollectionDetailPage = () => {
                 </CardContent>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="activity">
               <Card>
                 <CardContent className="pt-6">
@@ -255,7 +261,7 @@ const CollectionDetailPage = () => {
                       <div className="w-2 h-2 bg-status-info rounded-full mt-2"></div>
                       <div className="ml-3">
                         <p className="text-sm">Collection created</p>
-                        <span className="text-xs text-muted-foreground">{formatDate(collection.dateCreated)}</span>
+                        <span className="text-xs text-muted-foreground">{formatDate(collection.createdAt)}</span>
                       </div>
                     </li>
                   </ul>
@@ -298,7 +304,7 @@ const CollectionDetailPage = () => {
               </div>
             </CardContent>
           </Card>
-          
+
           <Card>
             <CardHeader>
               <CardTitle>Collection Share Link</CardTitle>

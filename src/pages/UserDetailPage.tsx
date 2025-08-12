@@ -7,9 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { formatDate } from '@/lib/formatters';
-import { User, Collection, fetchUsers, fetchCollections } from '@/services/mockData';
+// import { User, Collection, fetchUsers, fetchCollections } from '@/services/mockData';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { log } from 'console';
+import { useUsersStore } from '@/stores/usersStore';
+import { useCollectionsStore } from '@/stores/collectionsStore';
 
 const UserDetailPage = () => {
   const { id } = useParams();
@@ -17,23 +20,34 @@ const UserDetailPage = () => {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { fetchUsers, getUserById } = useUsersStore()
+  const { fetchCollections, collections: allCollections } = useCollectionsStore()
+
+  console.log('User ID:', id);
+
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
         const usersData = await fetchUsers();
-        const foundUser = usersData.find(u => u.id === id);
-        
+        console.log('Fetched Users:', usersData);
+        // const foundUser = usersData.find(u => u.id == id);
+        const foundUser = getUserById(id);
+
+
         if (foundUser) {
           setUser(foundUser);
-          
+          console.log('Found User:', foundUser);
+
           // Fetch collections for this user
-          const allCollections = await fetchCollections();
-          const userCollections = allCollections.filter(
-            c => c.hostEmail === foundUser.email
-          );
+          // const allCollections = await fetchCollections();
+          console.log('All Collections:', allCollections);
+
+          const userCollections = allCollections.data.filter(
+            c => c.user_id === foundUser.id);
           setCollections(userCollections);
+          console.log('User Collections:', userCollections);
         }
       } catch (error) {
         console.error('Failed to load user data:', error);
@@ -119,12 +133,12 @@ const UserDetailPage = () => {
                 <UserIcon size={40} className="text-gray-500" />
               </div>
             </div>
-            
+
             <div className="text-center mb-4">
               <h3 className="text-lg font-semibold">{user.fullName}</h3>
               <div className="mt-1">{getUserStatusBadge(user.status)}</div>
             </div>
-            
+
             <div className="space-y-3">
               <div className="flex items-center">
                 <Mail className="w-4 h-4 mr-2 text-muted-foreground" />
@@ -136,7 +150,7 @@ const UserDetailPage = () => {
               </div>
               <div className="flex items-center">
                 <Calendar className="w-4 h-4 mr-2 text-muted-foreground" />
-                <span className="text-sm">Joined on {formatDate(user.dateJoined)}</span>
+                <span className="text-sm">Joined on user.dateJoined</span>
               </div>
             </div>
           </CardContent>
@@ -149,7 +163,7 @@ const UserDetailPage = () => {
               <TabsTrigger value="collections">Collections ({collections.length})</TabsTrigger>
               <TabsTrigger value="activity">Activity Log</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="collections">
               <Card>
                 <CardContent className="p-0">
@@ -168,7 +182,7 @@ const UserDetailPage = () => {
                         {collections.map(collection => (
                           <tr key={collection.id}>
                             <td className="font-medium">{collection.title}</td>
-                            <td>₦{collection.amountRaised.toLocaleString()}</td>
+                            <td>₦{collection.amountRaised}</td>
                             <td>
                               {collection.status === 'active' && (
                                 <Badge variant="outline" className="bg-status-success/15 text-status-success">Active</Badge>
@@ -180,7 +194,7 @@ const UserDetailPage = () => {
                                 <Badge variant="outline" className="bg-muted/80 text-muted-foreground">Closed</Badge>
                               )}
                             </td>
-                            <td>{formatDate(collection.dateCreated)}</td>
+                            <td>{(collection.dateCreated)}</td>
                             <td>
                               <Button variant="ghost" size="sm" asChild>
                                 <Link to={`/collections/${collection.id}`}>View</Link>
@@ -198,7 +212,7 @@ const UserDetailPage = () => {
                 </CardContent>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="activity">
               <Card>
                 <CardContent className="pt-6">
@@ -221,7 +235,7 @@ const UserDetailPage = () => {
                       <div className="w-2 h-2 bg-status-info rounded-full mt-2"></div>
                       <div className="ml-3">
                         <p className="text-sm">Account created</p>
-                        <span className="text-xs text-muted-foreground">{formatDate(user.dateJoined)}</span>
+                        <span className="text-xs text-muted-foreground">{(user.dateJoined)}</span>
                       </div>
                     </li>
                   </ul>

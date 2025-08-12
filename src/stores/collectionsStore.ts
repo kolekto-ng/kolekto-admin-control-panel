@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface Collection {
+  data: any;
   id: string;
   title: string;
   description: string;
@@ -56,6 +57,7 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
             .eq("status", "paid");
 
           return {
+            data: collectionsData,
             id: collection.id,
             title: collection.title,
             description: collection.description || "",
@@ -71,7 +73,8 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
       );
 
       set({
-        collections: collectionsWithStats,
+        // data: collectionsWithStats,
+        collections: { collectionsWithStats, data: collectionsData },
         loading: false,
       });
     } catch (error) {

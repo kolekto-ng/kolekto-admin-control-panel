@@ -69,8 +69,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           collections!inner(title)
         `
           )
-          .order("created_at", { ascending: false })
-          .limit(5),
+          .order("created_at", { ascending: false }),
+        // .limit(5),
         supabase
           .from("withdrawals")
           .select(
@@ -80,8 +80,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           collections!withdrawals_collection_id_fkey(title)
         `
           )
-          .order("created_at", { ascending: false })
-          .limit(5),
+          .order("created_at", { ascending: false }),
+        // .limit(5),
       ]);
 
       // Calculate totals
