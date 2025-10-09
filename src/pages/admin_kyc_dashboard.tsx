@@ -46,117 +46,6 @@ import {
 } from 'lucide-react';
 import { axiosInstance } from '@/lib/axios';
 
-// Mock data for demonstration
-
-
-const mockUsers = [
-  {
-    id: 'user_001',
-    personalInfo: {
-      fullName: 'John Doe',
-      email: 'john.doe@email.com',
-      phone: '+234 123 456 7890',
-      dateOfBirth: '1990-05-15',
-      address: '123 Victoria Island, Lagos, Nigeria',
-      profilePicture: '/api/placeholder/150/150',
-      createdAt: '2024-01-15T10:30:00Z'
-    },
-    kycStatus: 'pending',
-    overallRiskScore: 75,
-    bvnVerification: {
-      status: 'verified',
-      bvn: '12345678901',
-      bvnData: {
-        first_name: 'John',
-        last_name: 'Doe',
-        mobile: '+234 123 456 7890',
-        date_of_birth: '1990-05-15'
-      },
-      matchScore: 95,
-      verifiedAt: '2024-01-18T14:22:00Z',
-      hasDiscrepancies: false,
-      discrepancies: []
-    },
-    identityVerification: {
-      status: 'pending',
-      documents: [
-        {
-          type: 'National ID',
-          status: 'pending',
-          uploadedAt: '2024-01-17T09:15:00Z',
-          fileUrl: '/api/placeholder/400/300',
-          fileSize: 2048000,
-          fileName: 'national_id_front.jpg'
-        },
-        {
-          type: 'Passport Photo',
-          status: 'pending',
-          uploadedAt: '2024-01-17T09:20:00Z',
-          fileUrl: '/api/placeholder/300/400',
-          fileSize: 1536000,
-          fileName: 'passport_photo.jpg'
-        }
-      ]
-    },
-    addressVerification: {
-      status: 'pending',
-      documents: [
-        {
-          type: 'Utility Bill',
-          status: 'pending',
-          uploadedAt: '2024-01-17T11:30:00Z',
-          fileUrl: '/api/placeholder/400/600',
-          fileSize: 3072000,
-          fileName: 'utility_bill_jan2024.pdf'
-        }
-      ]
-    },
-    bankVerification: {
-      bankName: 'First Bank of Nigeria',
-      accountNumber: '1234567890',
-      accountName: 'John Doe',
-      bvn: '12345678901',
-      status: 'verified',
-      verifiedAt: '2024-01-16T16:45:00Z'
-    },
-    securityData: {
-      lastLogin: '2024-01-20T08:30:00Z',
-      loginAttempts: [
-        {
-          timestamp: '2024-01-20T08:30:00Z',
-          location: 'Lagos, Nigeria',
-          device: 'Chrome on Windows',
-          ipAddress: '197.149.128.45',
-          status: 'successful'
-        },
-        {
-          timestamp: '2024-01-19T14:15:00Z',
-          location: 'Lagos, Nigeria',
-          device: 'Safari on iPhone',
-          ipAddress: '197.149.128.45',
-          status: 'successful'
-        }
-      ]
-    },
-    verificationHistory: [
-      {
-        action: 'BVN Verified',
-        timestamp: '2024-01-18T14:22:00Z',
-        adminId: 'admin_001',
-        adminName: 'Sarah Wilson',
-        notes: 'BVN verification successful with 95% match score'
-      },
-      {
-        action: 'Documents Uploaded',
-        timestamp: '2024-01-17T09:15:00Z',
-        adminId: null,
-        adminName: 'System',
-        notes: 'User uploaded National ID and Passport Photo'
-      }
-    ]
-  }
-];
-
 const AdminKYCDashboard = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserDetails, setSelectedUserDetails] = useState(null);
@@ -169,6 +58,7 @@ const AdminKYCDashboard = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const API_BASE_URL =
     import.meta.env.MODE === "production"
@@ -176,17 +66,22 @@ const AdminKYCDashboard = () => {
       : import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
 
   useEffect(() => {
+    fetchKYCVerifications();
+  }, []);
+
+  const fetchKYCVerifications = () => {
     setLoading(true);
     axiosInstance.get(`/adminurlabdkole/kyc-verifications`)
-      .then(res => res)
-      .then(data => {
-        console.log(data);
-
-        setUsers(data.data.kycs || []);
+      .then(res => {
+        console.log(res.data);
+        setUsers(res.data.kycs || []);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
-  }, []);
+      .catch((error) => {
+        console.error('Error fetching KYC verifications:', error);
+        setLoading(false);
+      });
+  };
 
   // Filter users based on search and status
   const filteredUsers = users.filter(user => {
@@ -242,19 +137,91 @@ const AdminKYCDashboard = () => {
       return <Badge className="bg-red-100 text-red-800">High Risk</Badge>;
     }
   };
+  const handleVerificationAction = async ({ action, documentType = null, documentId = null, verificationType = null }) => {
+    if (!selectedUser) return;
 
-  const handleVerificationAction = (action, documentType = null) => {
-    setVerificationAction(action);
-    // In a real app, this would make an API call to update the verification status
-    console.log(`Action: ${action}, Document: ${documentType}, Notes: ${adminNotes}`);
+    setActionLoading(true);
 
-    // Reset form
-    setAdminNotes('');
+    try {
+      let response;
+      const payload = {
+        notes: adminNotes,
+        ...(documentType && { documentType: documentType }),
+        ...(verificationType && { verification_type: verificationType })
+      };
+      console.log(payload);
 
-    // Close modals
-    setShowDocumentModal(false);
+      switch (action) {
+        case 'approve_document':
+          if (documentId) {
+            response = await axiosInstance.post(
+              `${API_BASE_URL}/adminurlabdkole/kyc-documents/${documentId}/approve`,
+              payload
+            );
+          } else {
+            throw new Error('No document ID provided');
+          }
+          break;
 
-    // Refresh user data (in real app, refetch from API)
+        case 'reject_document':
+          if (documentId) {
+            response = await axiosInstance.post(
+              `${API_BASE_URL}/adminurlabdkole/kyc-documents/${documentId}/reject`,
+              payload
+            );
+          } else {
+            throw new Error('No document ID provided');
+          }
+          break;
+
+        case 'add_note':
+          response = await axiosInstance.post(
+            `${API_BASE_URL}/adminurlabdkole/kyc-verifications/${selectedUser.id}/add-note`,
+            payload
+          );
+          break;
+
+        default:
+          throw new Error(`Unknown action: ${action}`);
+      }
+
+      console.log('Action response:', response.data);
+
+      if (response.data.message) {
+        alert(`KYC ${action.replace('_', ' ')} successful!`);
+
+        // Refresh user details
+        await fetchUserDetails(selectedUser.id);
+
+        // Refresh users list
+        await fetchKYCVerifications();
+
+        // Reset form
+        setAdminNotes('');
+        setShowDocumentModal(false);
+      } else {
+        alert(response.data.error || 'Action failed');
+      }
+    } catch (error) {
+      console.error('Error performing action:', error);
+      alert(error.response?.data?.error || error.response?.data?.message || 'Failed to perform action. Please try again.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const fetchUserDetails = async (userId) => {
+    setSelectedUserLoading(true);
+    try {
+      const response = await axiosInstance.get(
+        `${API_BASE_URL}/adminurlabdkole/kyc-verifications/${userId}`
+      );
+      setSelectedUserDetails(response.data);
+    } catch (error) {
+      console.error('Error fetching user details:', error);
+    } finally {
+      setSelectedUserLoading(false);
+    }
   };
 
   const openDocumentModal = (document) => {
@@ -268,16 +235,7 @@ const AdminKYCDashboard = () => {
       setSelectedUserDetails(null);
       return;
     }
-    console.log(selectedUser, 'user');
-
-    setSelectedUserLoading(true);
-    axiosInstance.get(`${API_BASE_URL}/adminurlabdkole/kyc-verifications/${selectedUser.id}`)
-      .then(res => res)
-      .then(data => {
-        setSelectedUserDetails(data.data);
-        setSelectedUserLoading(false);
-      })
-      .catch(() => setSelectedUserLoading(false));
+    fetchUserDetails(selectedUser.id);
   }, [selectedUser]);
 
   if (selectedUser && selectedUserLoading) {
@@ -330,14 +288,14 @@ const AdminKYCDashboard = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-4">
                     <Avatar className="h-12 w-12">
-                      <AvatarImage src={user.profile.avatar_url} />
+                      <AvatarImage src={user.profile?.avatar_url} />
                       <AvatarFallback>
-                        {user.profile.full_name.split(' ').map(n => n[0]).join('')}
+                        {user.profile?.full_name?.split(' ').map(n => n[0]).join('') || 'U'}
                       </AvatarFallback>
                     </Avatar>
                     <div>
-                      <h3 className="font-semibold text-lg">{user.profile.full_name}</h3>
-                      <p className="text-sm text-muted-foreground">{user.profile.email}</p>
+                      <h3 className="font-semibold text-lg">{user.profile?.full_name}</h3>
+                      <p className="text-sm text-muted-foreground">{user.profile?.email}</p>
                       <p className="text-xs text-muted-foreground">ID: {user.id}</p>
                     </div>
                   </div>
@@ -345,8 +303,8 @@ const AdminKYCDashboard = () => {
                   <div className="flex items-center space-x-4">
                     <div className="text-right">
                       <div className="flex items-center space-x-2 mb-1">
-                        {getStatusBadge(user.kycStatus)}
-                        {getRiskBadge(user.overallRiskScore)}
+                        {getStatusBadge(user.status)}
+                        {getRiskBadge(user.overallRiskScore || 75)}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         Submitted: {new Date(user.profile?.updated_at).toLocaleDateString()}
@@ -378,10 +336,11 @@ const AdminKYCDashboard = () => {
   if (!selectedUserDetails) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-muted-foreground">No users found matching your criteria.</p>
+        <p className="text-muted-foreground">Loading user details...</p>
       </div>
     );
   }
+
   return (
     <div className="space-y-6 p-6">
       {/* Header with Back Button */}
@@ -391,13 +350,13 @@ const AdminKYCDashboard = () => {
             ← Back to List
           </Button>
           <div>
-            <h1 className="text-2xl font-bold">{selectedUserDetails?.personalInfo?.fullName}</h1>
+            <h1 className="text-2xl font-bold">{selectedUserDetails?.personalInfo?.full_name}</h1>
             <p className="text-muted-foreground">KYC Verification Review</p>
           </div>
         </div>
         <div className="flex items-center space-x-2">
           {getStatusBadge(selectedUserDetails?.kycStatus)}
-          {getRiskBadge(selectedUserDetails?.overallRiskScore)}
+          {getRiskBadge(selectedUserDetails?.overallRiskScore || 75)}
         </div>
       </div>
 
@@ -417,7 +376,7 @@ const AdminKYCDashboard = () => {
                 <Avatar className="h-16 w-16">
                   <AvatarImage src={selectedUserDetails.personalInfo?.avatar_url} />
                   <AvatarFallback>
-                    {selectedUserDetails.personalInfo?.fullName.split(' ').map(n => n[0]).join('')}
+                    {selectedUserDetails.personalInfo?.fullName?.split(' ').map(n => n[0]).join('') || 'U'}
                   </AvatarFallback>
                 </Avatar>
                 <div className="space-y-1">
@@ -440,7 +399,11 @@ const AdminKYCDashboard = () => {
                   <Label className="text-sm font-medium">Date of Birth</Label>
                   <div className="flex items-center space-x-2 mt-1">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">{new Date(selectedUserDetails.personalInfo?.dateOfBirth).toLocaleDateString()}</span>
+                    <span className="text-sm">
+                      {selectedUserDetails.personalInfo?.dateOfBirth
+                        ? new Date(selectedUserDetails.personalInfo.dateOfBirth).toLocaleDateString()
+                        : 'N/A'}
+                    </span>
                   </div>
                 </div>
                 <div>
@@ -453,46 +416,11 @@ const AdminKYCDashboard = () => {
                 <Label className="text-sm font-medium">Address</Label>
                 <div className="flex items-center space-x-2 mt-1">
                   <MapPin className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">{selectedUserDetails.personalInfo?.address}</span>
+                  <span className="text-sm">{selectedUserDetails.personalInfo?.address || 'N/A'}</span>
                 </div>
               </div>
             </CardContent>
           </Card>
-
-          {/* BVN Verification */}
-          {/* <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span className="flex items-center">
-                  <CreditCard className="h-5 w-5 mr-2" />
-                  BVN Verification
-                </span>
-                {getStatusBadge(selectedUser.bvnVerification.status)}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium">BVN</Label>
-                  <p className="text-sm font-mono">{selectedUser.bvnVerification.bvn}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Match Score</Label>
-                  <p className="text-sm font-semibold text-green-600">{selectedUser.bvnVerification.matchScore}%</p>
-                </div>
-              </div>
-
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <h4 className="font-medium text-green-800 text-sm mb-2">BVN Data Retrieved:</h4>
-                <div className="text-xs text-green-600 space-y-1">
-                  <p>• Name: {selectedUser.bvnVerification.bvnData.first_name} {selectedUser.bvnVerification.bvnData.last_name}</p>
-                  <p>• Phone: {selectedUser.bvnVerification.bvnData.mobile}</p>
-                  <p>• DOB: {selectedUser.bvnVerification.bvnData.date_of_birth}</p>
-                  <p>• Verified: {new Date(selectedUser.bvnVerification.verifiedAt).toLocaleString()}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card> */}
 
           {/* Identity Documents */}
           <Card>
@@ -502,11 +430,11 @@ const AdminKYCDashboard = () => {
                   <FileText className="h-5 w-5 mr-2" />
                   Identity Documents
                 </span>
-                {getStatusBadge(selectedUserDetails.identityVerification.status)}
+                {getStatusBadge(selectedUserDetails.identityVerification?.status)}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {selectedUserDetails.identityVerification.documents.map((doc, index) => (
+              {selectedUserDetails.identityVerification?.documents?.map((doc, index) => (
                 <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
                   <div className="flex items-center space-x-3">
                     <FileText className="h-5 w-5 text-blue-600" />
@@ -527,27 +455,26 @@ const AdminKYCDashboard = () => {
                       <Eye className="h-4 w-4 mr-1" />
                       View
                     </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleVerificationAction({ action: 'reject_document', documentType: doc.type, documentId: doc.id, verificationType: 'identity' })}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Reject
+                    </Button>
+                    <Button
+                      className="bg-green-600 hover:bg-green-700"
+                      size="sm"
+                      onClick={() => handleVerificationAction({ action: 'approve_document', documentType: doc.type, documentId: doc.id, verificationType: 'identity' })}
+                    >
+                      <Check className="h-4 w-4 mr-1" />
+                      Approve
+                    </Button>
                   </div>
                 </div>
               ))}
 
-              <div className="flex space-x-2 pt-2">
-                <Button
-                  className="flex-1 bg-green-600 hover:bg-green-700"
-                  onClick={() => handleVerificationAction('approve_identity')}
-                >
-                  <Check className="h-4 w-4 mr-2" />
-                  Approve All
-                </Button>
-                <Button
-                  variant="destructive"
-                  className="flex-1"
-                  onClick={() => handleVerificationAction('reject_identity')}
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Reject All
-                </Button>
-              </div>
             </CardContent>
           </Card>
 
@@ -559,11 +486,11 @@ const AdminKYCDashboard = () => {
                   <MapPin className="h-5 w-5 mr-2" />
                   Address Verification
                 </span>
-                {getStatusBadge(selectedUserDetails.addressVerification.status)}
+                {getStatusBadge(selectedUserDetails.addressVerification?.status)}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {selectedUserDetails.addressVerification.documents.map((doc, index) => (
+              {selectedUserDetails.addressVerification?.documents?.map((doc, index) => (
                 <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
                   <div className="flex items-center space-x-3">
                     <FileText className="h-5 w-5 text-blue-600" />
@@ -584,147 +511,32 @@ const AdminKYCDashboard = () => {
                       <Eye className="h-4 w-4 mr-1" />
                       View
                     </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleVerificationAction({ action: 'reject_document', documentType: doc.type, documentId: doc.id, verificationType: 'address' })}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Reject
+                    </Button>
+                    <Button
+                      className="bg-green-600 hover:bg-green-700"
+                      size="sm"
+                      onClick={() => handleVerificationAction({ action: 'approve_document', documentType: doc.type, documentId: doc.id, verificationType: 'address' })}
+                    >
+                      <Check className="h-4 w-4 mr-1" />
+                      Approve
+                    </Button>
                   </div>
                 </div>
               ))}
 
-              <div className="flex space-x-2 pt-2">
-                <Button
-                  className="flex-1 bg-green-600 hover:bg-green-700"
-                  onClick={() => handleVerificationAction('approve_address')}
-                >
-                  <Check className="h-4 w-4 mr-2" />
-                  Approve All
-                </Button>
-                <Button
-                  variant="destructive"
-                  className="flex-1"
-                  onClick={() => handleVerificationAction('reject_address')}
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Reject All
-                </Button>
-              </div>
             </CardContent>
           </Card>
         </div>
 
         {/* Right Column - Sidebar Info */}
         <div className="space-y-6">
-          {/* Quick Actions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Shield className="h-5 w-5 mr-2" />
-                Quick Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button
-                className="w-full bg-green-600 hover:bg-green-700"
-                onClick={() => handleVerificationAction('approve_all')}
-              >
-                <Check className="h-4 w-4 mr-2" />
-                Approve All KYC
-              </Button>
-              <Button
-                variant="destructive"
-                className="w-full"
-                onClick={() => handleVerificationAction('reject_all')}
-              >
-                <X className="h-4 w-4 mr-2" />
-                Reject All KYC
-              </Button>
-              <Button variant="outline" className="w-full">
-                <MessageSquare className="h-4 w-4 mr-2" />
-                Request More Info
-              </Button>
-              <Button variant="outline" className="w-full">
-                <Download className="h-4 w-4 mr-2" />
-                Download Report
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Bank Verification */}
-          {/* <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span className="flex items-center">
-                  <Building className="h-5 w-5 mr-2" />
-                  Bank Account
-                </span>
-                {getStatusBadge(selectedUser.bankVerification.status)}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div>
-                <Label className="text-sm font-medium">Bank</Label>
-                <p className="text-sm">{selectedUser.bankVerification.bankName}</p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium">Account Number</Label>
-                <p className="text-sm font-mono">{selectedUser.bankVerification.accountNumber}</p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium">Account Name</Label>
-                <p className="text-sm">{selectedUser.bankVerification.accountName}</p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium">Verified</Label>
-                <p className="text-sm text-green-600">{new Date(selectedUser.bankVerification.verifiedAt).toLocaleDateString()}</p>
-              </div>
-            </CardContent>
-          </Card> */}
-
-          {/* Security Info */}
-          {/* <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Shield className="h-5 w-5 mr-2" />
-                Security Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <Label className="text-sm font-medium">Last Login</Label>
-                <p className="text-sm">{new Date(selectedUser.securityData.lastLogin).toLocaleString()}</p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium">Recent Activity</Label>
-                <div className="space-y-2 mt-2">
-                  {selectedUser.securityData.loginAttempts.slice(0, 3).map((attempt, index) => (
-                    <div key={index} className="text-xs bg-gray-50 p-2 rounded">
-                      <p className="font-medium">{attempt.location}</p>
-                      <p className="text-muted-foreground">{new Date(attempt.timestamp).toLocaleString()}</p>
-                      <p className="text-muted-foreground">{attempt.device}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card> */}
-
-          {/* Verification History */}
-          {/* <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <History className="h-5 w-5 mr-2" />
-                Verification History
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {selectedUser.verificationHistory.map((item, index) => (
-                <div key={index} className="text-xs bg-gray-50 p-2 rounded">
-                  <p className="font-medium">{item.action}</p>
-                  <p className="text-muted-foreground">{new Date(item.timestamp).toLocaleString()}</p>
-                  <p className="text-muted-foreground">By: {item.adminName}</p>
-                  {item.notes && <p className="text-gray-600 mt-1">{item.notes}</p>}
-                </div>
-              ))}
-            </CardContent>
-          </Card> */}
 
           {/* Admin Notes */}
           <Card>
@@ -738,8 +550,12 @@ const AdminKYCDashboard = () => {
                 onChange={(e) => setAdminNotes(e.target.value)}
                 rows={4}
               />
-              <Button className="w-full" onClick={() => handleVerificationAction('add_note')}>
-                Save Note
+              <Button
+                className="w-full"
+                onClick={() => handleVerificationAction({ action: 'add_note', verificationType: 'identity' })}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Saving...' : 'Save Note'}
               </Button>
             </CardContent>
           </Card>
@@ -798,17 +614,19 @@ const AdminKYCDashboard = () => {
             </Button>
             <Button
               variant="destructive"
-              onClick={() => handleVerificationAction('reject_document', selectedDocument?.type)}
+              onClick={() => handleVerificationAction({ action: 'reject_document', documentType: selectedDocument?.type, documentId: selectedDocument?.id, verificationType: 'identity' })}
+              disabled={actionLoading}
             >
               <X className="h-4 w-4 mr-2" />
-              Reject Document
+              {actionLoading ? 'Processing...' : 'Reject Document'}
             </Button>
             <Button
               className="bg-green-600 hover:bg-green-700"
-              onClick={() => handleVerificationAction('approve_document', selectedDocument?.type)}
+              onClick={() => handleVerificationAction({ action: 'approve_document', documentType: selectedDocument?.type, documentId: selectedDocument?.id, verificationType: 'identity' })}
+              disabled={actionLoading}
             >
               <Check className="h-4 w-4 mr-2" />
-              Approve Document
+              {actionLoading ? 'Processing...' : 'Approve Document'}
             </Button>
           </DialogFooter>
         </DialogContent>
