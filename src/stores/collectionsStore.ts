@@ -56,6 +56,13 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
             .eq("collection_id", collection.id)
             .eq("status", "paid");
 
+          const { data: wallet } = await supabase
+            .from("wallets")
+            .select("*")
+            .eq("collection_id", collection.id);
+
+          console.log({ ...wallet[0] });
+
           return {
             data: collectionsData,
             id: collection.id,
@@ -63,8 +70,13 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
             description: collection.description || "",
             organizer: collection.profiles?.full_name || "Unknown Organizer",
             targetAmount: Number(collection.amount),
-            raisedAmount: Number(collection.total_amount || 0),
-            contributors: count || 0,
+            raisedAmount: Number(
+              collection.amount * collection.total_contributions || 0
+            ),
+            totalWithdrawn: Number(wallet[0]?.withdrawn || 0),
+            wallet: wallet,
+            availableBalance: Number(wallet[0]?.available_balance || 0),
+            contributors: +collection.total_contributions || 0,
             status: collection.status,
             deadline: collection.deadline || "",
             createdAt: collection.created_at,
@@ -74,7 +86,7 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
 
       set({
         // data: collectionsWithStats,
-        collections: { collectionsWithStats, data: collectionsData },
+        collections: collectionsWithStats,
         loading: false,
       });
     } catch (error) {

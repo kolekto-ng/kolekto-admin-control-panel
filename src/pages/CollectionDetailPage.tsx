@@ -19,17 +19,19 @@ const CollectionDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  const { fetchCollections, collections } = useCollectionsStore()
+  const { fetchCollections, collections, getCollectionById } = useCollectionsStore()
+
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
         fetchCollections();
+        const collection = getCollectionById(id);
         const collectionsData = collections.collectionsWithStats || [];
-        console.log('Fetched Collections:', collectionsData, id);
+        console.log('Fetched Collections:', collection, id);
 
-        const foundCollection = collectionsData.find(c => c.id === id);
+        const foundCollection = getCollectionById(id);
 
         if (foundCollection) {
           setCollection(foundCollection);
@@ -281,26 +283,26 @@ const CollectionDetailPage = () => {
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Total raised:</span>
-                  <span className="font-medium">{formatCurrency(collection.amountRaised)}</span>
+                  <span className="font-medium">{formatCurrency(collection.raisedAmount)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Total withdrawn:</span>
-                  <span className="font-medium">{formatCurrency(collection.amountRaised * 0.3)}</span>
+                  <span className="font-medium">{formatCurrency(collection.totalWithdrawn)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Available balance:</span>
-                  <span className="font-medium">{formatCurrency(collection.amountRaised * 0.7)}</span>
+                  <span className="font-medium">{formatCurrency(collection.availableBalance)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Total contributors:</span>
-                  <span className="font-medium">{collection.totalContributors}</span>
+                  <span className="font-medium">{collection.contributors}</span>
                 </div>
-                <div className="flex justify-between">
+                {/* <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Average contribution:</span>
                   <span className="font-medium">
-                    {formatCurrency(Math.round(collection.amountRaised / collection.totalContributors))}
+                    {formatCurrency(Math.round(collection.raisedAmount / collection.contributors))}
                   </span>
-                </div>
+                </div> */}
               </div>
             </CardContent>
           </Card>

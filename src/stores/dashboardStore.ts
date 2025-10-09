@@ -54,7 +54,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         supabase
           .from("collections")
           .select("*", { count: "exact", head: true })
-          .is("deleted_at", null),
+          .lt("deadline", new Date().toISOString()),
         supabase.from("contributions").select("amount").eq("status", "paid"),
         supabase.from("withdrawals").select("amount, status"),
         supabase
@@ -84,6 +84,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         // .limit(5),
       ]);
 
+      console.log(totalCollections, "totalCollections");
+
       // Calculate totals
       const totalContributions =
         contributionsData?.reduce((sum, contrib) => sum + contrib.amount, 0) ||
@@ -93,9 +95,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           (sum, withdrawal) => sum + withdrawal.amount,
           0
         ) || 0;
+
       const approvedWithdrawals =
         withdrawalsData
-          ?.filter((w) => w.status === "approved")
+          ?.filter((w) => w.status === "success")
           ?.reduce((sum, withdrawal) => sum + withdrawal.amount, 0) || 0;
 
       const stats: DashboardStats = {
