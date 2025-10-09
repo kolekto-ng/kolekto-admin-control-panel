@@ -44,6 +44,7 @@ import {
   Search,
   Filter
 } from 'lucide-react';
+import { axiosInstance } from '@/lib/axios';
 
 // Mock data for demonstration
 
@@ -176,10 +177,12 @@ const AdminKYCDashboard = () => {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API_BASE_URL}/adminurlabdkole/kyc-verifications`)
-      .then(res => res.json())
+    axiosInstance.get(`/adminurlabdkole/kyc-verifications`)
+      .then(res => res)
       .then(data => {
-        setUsers(data.kycs || []);
+        console.log(data);
+
+        setUsers(data.data.kycs || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -268,10 +271,10 @@ const AdminKYCDashboard = () => {
     console.log(selectedUser, 'user');
 
     setSelectedUserLoading(true);
-    fetch(`${API_BASE_URL}/adminurlabdkole/kyc-verifications/${selectedUser.id}`)
-      .then(res => res.json())
+    axiosInstance.get(`${API_BASE_URL}/adminurlabdkole/kyc-verifications/${selectedUser.id}`)
+      .then(res => res)
       .then(data => {
-        setSelectedUserDetails(data);
+        setSelectedUserDetails(data.data);
         setSelectedUserLoading(false);
       })
       .catch(() => setSelectedUserLoading(false));
