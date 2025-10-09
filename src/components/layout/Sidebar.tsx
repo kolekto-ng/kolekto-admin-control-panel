@@ -2,10 +2,10 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { 
-  LayoutDashboard, 
-  Users, 
-  Folders, 
+import {
+  LayoutDashboard,
+  Users,
+  Folders,
   Wallet,
   Settings,
   ChevronLeft,
@@ -38,6 +38,12 @@ export const Sidebar = () => {
       badge: 3 // Example badge count for pending withdrawals
     },
     {
+      name: 'KYC',
+      icon: Wallet,
+      path: '/kyc',
+      // badge: 3 // Example badge count for pending withdrawals
+    },
+    {
       name: 'Settings',
       icon: Settings,
       path: '/settings'
@@ -45,47 +51,47 @@ export const Sidebar = () => {
   ];
 
   return (
-    <div 
+    <div
       className={cn(
         "bg-sidebar text-sidebar-foreground h-full relative transition-all duration-300",
         collapsed ? "w-[70px]" : "w-64"
       )}
     >
       {/* Collapse Button */}
-      <button 
+      <button
         className="absolute -right-3 top-10 bg-white text-gray-600 rounded-full p-1 border shadow-sm hover:bg-gray-50"
         onClick={() => setCollapsed(prev => !prev)}
       >
         {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
       </button>
-      
+
       {/* Logo */}
       <div className={cn(
         "flex items-center h-16 px-4 border-b border-sidebar-border",
         collapsed ? "justify-center" : "justify-start"
       )}>
-        <img 
-          src="/lovable-uploads/6fdf0a9f-1402-4c43-b9bf-be38c3e2d490.png" 
-          alt="Kolekto Logo" 
+        <img
+          src="/lovable-uploads/6fdf0a9f-1402-4c43-b9bf-be38c3e2d490.png"
+          alt="Kolekto Logo"
           className={cn(
             "transition-all duration-300",
             collapsed ? "h-8" : "h-10"
-          )} 
+          )}
         />
         {!collapsed && <span className="ml-2 text-xl font-semibold">Admin</span>}
       </div>
-      
+
       {/* Navigation */}
       <nav className="px-2 py-4">
         <ul className="space-y-1">
           {navItems.map((item) => (
             <li key={item.name}>
-              <NavLink 
-                to={item.path} 
+              <NavLink
+                to={item.path}
                 className={({ isActive }) => cn(
                   "flex items-center py-2 px-3 rounded-md transition-colors",
-                  isActive 
-                    ? "bg-sidebar-accent text-sidebar-primary" 
+                  isActive
+                    ? "bg-sidebar-accent text-sidebar-primary"
                     : "hover:bg-sidebar-accent/50",
                   collapsed ? "justify-center" : "justify-start"
                 )}
@@ -105,7 +111,7 @@ export const Sidebar = () => {
           ))}
         </ul>
       </nav>
-      
+
       {/* User Profile (Bottom) */}
       <div className={cn(
         "absolute bottom-0 left-0 right-0 p-4 border-t border-sidebar-border",

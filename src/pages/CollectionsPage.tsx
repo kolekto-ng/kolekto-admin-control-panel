@@ -39,7 +39,7 @@ const CollectionsPage = () => {
 
   useEffect(() => {
 
-    let filtered = collections.collectionsWithStats || [];
+    let filtered = collections || [];
 
     // Apply search filter
     if (searchTerm) {

@@ -8,7 +8,7 @@ import { useAuthStore } from '@/stores/authStore';
 
 export const AdminLayout = () => {
   const navigate = useNavigate();
-  const { user, loading, initialized, initialize } = useAuthStore();
+  const { user = {}, loading, initialized, initialize } = useAuthStore();
 
   useEffect(() => {
     initialize();
@@ -40,7 +40,7 @@ export const AdminLayout = () => {
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
       <Sidebar />
-      
+
       {/* Main Content */}
       <div className="flex flex-col flex-1 overflow-hidden">
         <Header />

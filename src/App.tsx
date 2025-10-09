@@ -17,6 +17,7 @@ import SettingsPage from "./pages/SettingsPage";
 import ProfilePage from "./pages/ProfilePage";
 import LoginPage from "./pages/LoginPage";
 import NotFound from "./pages/NotFound";
+import AdminKYCDashboard from "./pages/admin_kyc_dashboard";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ const App = () => (
             <Route path="withdrawals/:id" element={<WithdrawalDetailPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="kyc" element={<AdminKYCDashboard />} />
             <Route path="profile" element={<ProfilePage />} />
           </Route>
           <Route path="*" element={<NotFound />} />

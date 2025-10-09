@@ -11,6 +11,8 @@ import { useDashboardStore } from '@/stores/dashboardStore';
 
 const Dashboard = () => {
   const { stats, transactions, loading, error, fetchDashboardData } = useDashboardStore();
+  console.log('stats:', stats);
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -42,39 +44,39 @@ const Dashboard = () => {
           <StatsSkeleton />
         ) : stats ? (
           <>
-            <StatsCard 
-              title="Total Users" 
+            <StatsCard
+              title="Total Users"
               value={stats.totalUsers.toString()}
               description="Registered accounts"
               icon="users"
               trend="up"
               trendValue="12%"
             />
-            <StatsCard 
-              title="Total Collections" 
+            <StatsCard
+              title="Total Collections"
               value={stats.totalCollections.toString()}
               description="Active fundraising campaigns"
               icon="folders"
               trend="up"
               trendValue="5%"
             />
-            <StatsCard 
-              title="Total Contributions" 
+            <StatsCard
+              title="Total Contributions"
               value={formatCurrency(stats.totalContributions)}
               description="Sum of successful payments"
               icon="coins"
               trend="up"
               trendValue="8%"
             />
-            <StatsCard 
-              title="Total Withdrawals" 
+            <StatsCard
+              title="Total Withdrawals"
               value={formatCurrency(stats.totalWithdrawals)}
               description="All-time withdrawals"
               icon="wallet"
               trend="stable"
             />
-            <StatsCard 
-              title="Approved Withdrawals" 
+            <StatsCard
+              title="Approved Withdrawals"
               value={formatCurrency(stats.approvedWithdrawals)}
               description="Processed and completed"
               icon="check"
@@ -82,8 +84,8 @@ const Dashboard = () => {
               trendValue="3%"
               variant="success"
             />
-            <StatsCard 
-              title="Pending Withdrawals" 
+            <StatsCard
+              title="Pending Withdrawals"
               value={stats.pendingWithdrawals.toString()}
               description="Awaiting approval"
               icon="clock"
@@ -92,8 +94,8 @@ const Dashboard = () => {
               variant="warning"
               notification={stats.pendingWithdrawals > 0}
             />
-            <StatsCard 
-              title="Flagged Transactions" 
+            <StatsCard
+              title="Flagged Transactions"
               value={stats.flaggedTransactions.toString()}
               description="Requires attention"
               icon="alert-circle"
