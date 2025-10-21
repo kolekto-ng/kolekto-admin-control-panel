@@ -608,6 +608,7 @@ const AdminKYCDashboard = () => {
             </div>
           )}
 
+
           <DialogFooter className="space-x-2">
             <Button variant="outline" onClick={() => setShowDocumentModal(false)}>
               Close
