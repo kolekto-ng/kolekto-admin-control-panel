@@ -180,10 +180,20 @@ const WithdrawalsPage = () => {
                 {filteredWithdrawals.length > 0 ? (
                   filteredWithdrawals.map((withdrawal) => (
                     <tr key={withdrawal.id} className="hover:bg-muted/50">
-                      <td className="py-3 font-medium">{withdrawal.collectionName}</td>
+                      <td className="py-3 font-medium">
+                        <Button variant="link" className="p-0 h-auto font-medium text-foreground hover:underline" asChild>
+                          <Link to={`/collections/${withdrawal.collectionId}`}>
+                            {withdrawal.collectionName}
+                          </Link>
+                        </Button>
+                      </td>
                       <td>
-                        <div>{withdrawal.hostName}</div>
-                        <div className="text-xs text-muted-foreground">{withdrawal.hostEmail}</div>
+                        <Button variant="link" className="p-0 h-auto font-normal text-foreground hover:underline block text-left" asChild>
+                          <Link to={`/users/${withdrawal.hostId}`}>
+                            <div>{withdrawal.hostName}</div>
+                            <div className="text-xs text-muted-foreground font-normal no-underline opacity-70">{withdrawal.hostEmail}</div>
+                          </Link>
+                        </Button>
                       </td>
                       <td className="font-medium">{formatCurrency(withdrawal.requestedAmount)}</td>
                       <td>{formatDate(withdrawal.dateRequested)}</td>

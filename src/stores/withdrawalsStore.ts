@@ -7,6 +7,7 @@ export interface Withdrawal {
   id: string;
   collectionId: string;
   collectionName?: string;
+  hostId: string;
   hostName: string;
   hostEmail: string;
   requestedAmount: number;
@@ -75,6 +76,7 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
           id: withdrawal.id,
           collectionId: withdrawal.collection_id,
           collectionName: withdrawal.collections?.title || "Unknown Collection",
+          hostId: withdrawal.user_id,
           hostName: withdrawal.profile?.full_name || "Unknown Host",
           hostEmail: withdrawal.profile?.email || "unknown@example.com",
           requestedAmount: withdrawal.amount,
@@ -108,18 +110,15 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
   approveWithdrawal: async (id: string) => {
     try {
       console.log("Approving withdrawal with ID:", id);
-      // Call the API to approve the withdrawal
-      await axiosInstance.post("/withdrawals/approve", { id });
-      // Update the withdrawal status in the database
 
-      // const { error } = await supabase
-      //   .from("withdrawals")
-      //   .update({ status: "approved" })
-      //   .eq("id", id);
+      const { error } = await supabase
+        .from("withdrawals")
+        .update({ status: "approved" })
+        .eq("id", id);
 
-      // if (error) {
-      //   throw error;
-      // }
+      if (error) {
+        throw error;
+      }
 
       // Update local state
       set((state) => ({
@@ -132,14 +131,23 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
     } catch (error) {
       console.error("Error approving withdrawal:", error);
       set({ error: "Failed to approve withdrawal" });
+      throw error;
     }
   },
 
   rejectWithdrawal: async (id: string) => {
     try {
       console.log("Rejecting withdrawal with ID:", id);
-      // Call the API to reject the withdrawal
-      await axiosInstance.post("/withdrawals/reject", { id });
+
+      const { error } = await supabase
+        .from("withdrawals")
+        .update({ status: "rejected" })
+        .eq("id", id);
+
+      if (error) {
+        throw error;
+      }
+
       // Update local state
       set((state) => ({
         withdrawals: state.withdrawals.map((withdrawal) =>
@@ -151,6 +159,7 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
     } catch (error) {
       console.error("Error rejecting withdrawal:", error);
       set({ error: "Failed to reject withdrawal" });
+      throw error;
     }
   },
 }));

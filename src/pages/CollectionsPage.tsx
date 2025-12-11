@@ -123,6 +123,7 @@ const CollectionsPage = () => {
               <thead>
                 <tr>
                   <th>Title</th>
+                  <th>Type</th>
                   <th>Organizer</th>
                   <th>Amount Raised</th>
                   <th>Contributors</th>
@@ -137,7 +138,16 @@ const CollectionsPage = () => {
                     <tr key={collection.id} className="hover:bg-muted/50">
                       <td className="py-3 font-medium">{collection.title}</td>
                       <td>
-                        <div>{collection.organizer}</div>
+                        <Badge variant="secondary" className="capitalize font-normal">
+                          {collection.type}
+                        </Badge>
+                      </td>
+                      <td>
+                        <Button variant="link" className="p-0 h-auto font-normal text-foreground" asChild>
+                          <Link to={`/users/${collection.userId}`}>
+                            {collection.organizer}
+                          </Link>
+                        </Button>
                       </td>
                       <td>{formatCurrency(collection.raisedAmount)}</td>
                       <td>{collection.contributors}</td>
@@ -152,7 +162,7 @@ const CollectionsPage = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <td colSpan={8} className="text-center py-8 text-muted-foreground">
                       No collections found matching your criteria
                     </td>
                   </tr>
