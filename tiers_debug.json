@@ -1,0 +1,18 @@
+[
+  {
+    "contributions_fields": [
+      {
+        "id": "1",
+        "name": "Name",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "1761455582022",
+        "name": "Number",
+        "type": "tel",
+        "required": true
+      }
+    ]
+  }
+]

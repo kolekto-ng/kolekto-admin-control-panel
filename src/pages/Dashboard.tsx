@@ -1,5 +1,7 @@
 
 import { useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
@@ -115,6 +117,9 @@ const Dashboard = () => {
         <Card className="lg:col-span-3 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium">Recent Transactions</h2>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/transactions">View All</Link>
+            </Button>
           </div>
           {loading ? (
             <div className="flex items-center justify-center h-48">
