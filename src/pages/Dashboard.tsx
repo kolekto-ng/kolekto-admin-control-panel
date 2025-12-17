@@ -62,6 +62,7 @@ const Dashboard = () => {
               trend="up"
               trendValue="5%"
             />
+
             <StatsCard
               title="Total Contributions"
               value={formatCurrency(stats.totalContributions)}
