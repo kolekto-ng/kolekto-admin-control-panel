@@ -8,13 +8,40 @@ export interface Collection {
   description: string;
   organizer: string;
   userId: string;
+  // New canonical type field
+  collection_type: string;
+  // Legacy type field (kept for backwards compat)
+  type: string;
   targetAmount: number;
   raisedAmount: number;
   contributors: number;
-  status: "active" | "completed" | "paused";
-  type: string;
+  status: string;
   deadline: string;
   createdAt: string;
+  // New fields from backend
+  slug: string | null;
+  rejection_reason: string | null;
+  min_contribution: number;
+  target_amount: number | null;
+  event_date: string | null;
+  ticket_mode: string | null;
+  allow_multiple_quantity: boolean;
+  is_open_ended: boolean;
+  auto_close: boolean;
+  campaign_category: string | null;
+  campaign_summary: string | null;
+  campaign_keywords: string | null;
+  campaign_country: string;
+  social_links: any[];
+  banner_url: string | null;
+  price_tiers: any[];
+  story: any | null;
+  story_images: any[];
+  unique_id_enabled: boolean;
+  fee_bearer: string;
+  wallet: any;
+  availableBalance: number;
+  totalWithdrawn: number;
 }
 
 interface CollectionsState {
@@ -62,40 +89,84 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
         }
       }
 
-      // Get contributors count for each collection
-      const collectionsWithStats = await Promise.all(
-        collectionsData?.map(async (collection: any) => {
-          // Flatten wallet fetch?
-          const { data: wallet } = await supabase
-            .from("wallets")
-            .select("*")
-            .eq("collection_id", collection.id);
+      // Fetch wallets for all collections in one query
+      const collectionIds = collectionsData?.map((c: any) => c.id) || [];
+      let walletsMap: Record<string, any> = {};
 
-          const profile = profilesMap[collection.user_id];
-          const organizerName = profile
-            ? (profile.full_name || profile.email || "Unknown User")
-            : "Unknown Organizer";
+      if (collectionIds.length > 0) {
+        const { data: walletsData } = await supabase
+          .from("wallets")
+          .select("*")
+          .in("collection_id", collectionIds)
+          .order("updated_at", { ascending: false });
 
-          return {
-            data: collectionsData,
-            id: collection.id,
-            title: collection.title,
-            description: collection.description || "",
-            organizer: organizerName,
-            userId: collection.user_id,
-            targetAmount: Number(collection.amount),
-            raisedAmount: Number(wallet?.[0]?.ledger_balance || 0),
-            totalWithdrawn: Number(wallet?.[0]?.withdrawn || 0),
-            wallet: wallet,
-            availableBalance: Number(wallet?.[0]?.available_balance || 0),
-            contributors: +collection.total_contributions || 0,
-            status: collection.status,
-            type: collection.type,
-            deadline: collection.deadline || "",
-            createdAt: collection.created_at,
-          };
-        }) || []
-      );
+        if (walletsData) {
+          // Keep only the MOST RECENT wallet per collection (legacy data may
+          // contain duplicate wallet rows due to missing UNIQUE constraint).
+          walletsMap = walletsData.reduce((acc: any, wallet: any) => {
+            if (!acc[wallet.collection_id]) {
+              acc[wallet.collection_id] = wallet;
+            }
+            return acc;
+          }, {});
+        }
+      }
+
+      const collectionsWithStats = collectionsData?.map((collection: any) => {
+        const wallet = walletsMap[collection.id];
+        const profile = profilesMap[collection.user_id];
+        const organizerName = profile
+          ? (profile.full_name || profile.email || "Unknown User")
+          : "Unknown Organizer";
+
+        // Determine canonical collection_type: prefer new field, fallback to legacy type
+        const collectionType = collection.collection_type || collection.type || 'fixed';
+
+        return {
+          data: collection,
+          id: collection.id,
+          title: collection.title,
+          description: collection.description || "",
+          organizer: organizerName,
+          userId: collection.user_id,
+          collection_type: collectionType,
+          type: collection.type || 'flat',
+          targetAmount: Number(collection.target_amount || collection.amount || 0),
+          // Total Raised = total ever received (net of fees), NOT ledger_balance
+          // (which decreases when withdrawals happen). Use net_payment.
+          raisedAmount: Number(wallet?.net_payment || 0),
+          totalWithdrawn: Number(wallet?.withdrawn || 0),
+          wallet: wallet || null,
+          availableBalance: Number(wallet?.available_balance || 0),
+          pendingBalance: Number(wallet?.pending_balance || 0),
+          totalBalance: Number(wallet?.ledger_balance || 0),
+          contributors: +collection.total_contributions || 0,
+          status: collection.status,
+          deadline: collection.deadline || "",
+          createdAt: collection.created_at,
+          // New fields
+          slug: collection.slug || null,
+          rejection_reason: collection.rejection_reason || null,
+          min_contribution: Number(collection.min_contribution || 0),
+          target_amount: collection.target_amount ? Number(collection.target_amount) : null,
+          event_date: collection.event_date || null,
+          ticket_mode: collection.ticket_mode || null,
+          allow_multiple_quantity: collection.allow_multiple_quantity ?? true,
+          is_open_ended: collection.is_open_ended ?? false,
+          auto_close: collection.auto_close ?? false,
+          campaign_category: collection.campaign_category || null,
+          campaign_summary: collection.campaign_summary || null,
+          campaign_keywords: collection.campaign_keywords || null,
+          campaign_country: collection.campaign_country || 'Nigeria',
+          social_links: Array.isArray(collection.social_links) ? collection.social_links : [],
+          banner_url: collection.banner_url || null,
+          price_tiers: Array.isArray(collection.price_tiers) ? collection.price_tiers : [],
+          story: collection.story || null,
+          story_images: Array.isArray(collection.story_images) ? collection.story_images : [],
+          unique_id_enabled: collection.unique_id_enabled ?? false,
+          fee_bearer: collection.fee_bearer || 'organizer',
+        };
+      }) || [];
 
       set({
         collections: collectionsWithStats,

@@ -10,11 +10,28 @@ import { RecentTransactions } from '@/components/dashboard/RecentTransactions';
 import { formatCurrency } from '@/lib/formatters';
 import { StatsSkeleton } from '@/components/dashboard/StatsSkeleton';
 import { useDashboardStore } from '@/stores/dashboardStore';
+import { Badge } from '@/components/ui/badge';
+
+const COLLECTION_TYPE_LABELS: Record<string, string> = {
+  fixed: 'Fixed',
+  flat: 'Fixed',
+  tiered: 'Tiered',
+  ticket: 'Ticket',
+  open_pool: 'Open Pool',
+  fundraising: 'Fundraising',
+};
+
+const COLLECTION_TYPE_COLORS: Record<string, string> = {
+  fixed: 'bg-blue-100 text-blue-700',
+  flat: 'bg-blue-100 text-blue-700',
+  tiered: 'bg-purple-100 text-purple-700',
+  ticket: 'bg-amber-100 text-amber-700',
+  open_pool: 'bg-teal-100 text-teal-700',
+  fundraising: 'bg-pink-100 text-pink-700',
+};
 
 const Dashboard = () => {
   const { stats, transactions, loading, error, fetchDashboardData } = useDashboardStore();
-  console.log('stats:', stats);
-
   const { toast } = useToast();
 
   useEffect(() => {
@@ -57,12 +74,11 @@ const Dashboard = () => {
             <StatsCard
               title="Total Collections"
               value={stats.totalCollections.toString()}
-              description="Active fundraising campaigns"
+              description="All collection types"
               icon="folders"
               trend="up"
               trendValue="5%"
             />
-
             <StatsCard
               title="Total Contributions"
               value={formatCurrency(stats.totalContributions)}
@@ -98,20 +114,108 @@ const Dashboard = () => {
               notification={stats.pendingWithdrawals > 0}
             />
             <StatsCard
-              title="Flagged Transactions"
-              value={stats.flaggedTransactions.toString()}
-              description="Requires attention"
+              title="Fundraising Campaigns"
+              value={stats.totalCampaigns.toString()}
+              description={`${stats.activeCampaigns} active`}
+              icon="heart"
+              trend="up"
+              trendValue="3%"
+            />
+            <StatsCard
+              title="Pending Fundraisers"
+              value={stats.pendingFundraisers.toString()}
+              description="Awaiting review & approval"
               icon="alert-circle"
-              trend="down"
-              trendValue="5%"
-              variant="danger"
-              notification={stats.flaggedTransactions > 0}
+              trend="stable"
+              variant={stats.pendingFundraisers > 0 ? "warning" : undefined}
+              notification={stats.pendingFundraisers > 0}
+            />
+            <StatsCard
+              title="KYC Submissions"
+              value={stats.totalKycSubmissions.toString()}
+              description={`${stats.pendingKyc} pending review`}
+              icon="shield"
+              trend="stable"
+            />
+            <StatsCard
+              title="Pending KYC"
+              value={stats.pendingKyc.toString()}
+              description="Awaiting verification"
+              icon="shield"
+              trend="stable"
+              variant={stats.pendingKyc > 0 ? "warning" : undefined}
+              notification={stats.pendingKyc > 0}
             />
           </>
         ) : (
           <p>Failed to load stats data</p>
         )}
       </div>
+
+      {/* Collection Type Breakdown */}
+      {stats && Object.keys(stats.collectionsByType).length > 0 && (
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-medium">Collections by Type</h2>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/collections">View All</Link>
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {Object.entries(stats.collectionsByType).map(([type, count]) => (
+              <Link key={type} to={`/collections?type=${type}`} className="block">
+                <div className="border rounded-lg p-4 text-center hover:border-primary hover:bg-primary/5 transition-colors cursor-pointer">
+                  <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium mb-2 ${COLLECTION_TYPE_COLORS[type] || 'bg-gray-100 text-gray-700'}`}>
+                    {COLLECTION_TYPE_LABELS[type] || type}
+                  </span>
+                  <p className="text-2xl font-bold">{count}</p>
+                  <p className="text-xs text-muted-foreground">collections</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Fundraising Alert */}
+      {stats && stats.pendingFundraisers > 0 && (
+        <div className="flex items-center gap-3 bg-pink-50 border border-pink-200 rounded-lg p-4">
+          <span className="text-2xl">❤️</span>
+          <div className="flex-1">
+            <p className="font-medium text-pink-800">
+              {stats.pendingFundraisers} fundraising campaign{stats.pendingFundraisers > 1 ? 's need' : ' needs'} your review
+            </p>
+            <p className="text-sm text-pink-600">Review and approve or reject these pending fundraisers.</p>
+          </div>
+          <Button
+            size="sm"
+            className="bg-pink-600 hover:bg-pink-700 text-white shrink-0"
+            asChild
+          >
+            <Link to="/fundraising">Review Now</Link>
+          </Button>
+        </div>
+      )}
+
+      {/* KYC Alert */}
+      {stats && stats.pendingKyc > 0 && (
+        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+          <span className="text-2xl">🛡️</span>
+          <div className="flex-1">
+            <p className="font-medium text-indigo-800">
+              {stats.pendingKyc} KYC submission{stats.pendingKyc > 1 ? 's need' : ' needs'} your review
+            </p>
+            <p className="text-sm text-indigo-600">Review and verify user identity documents.</p>
+          </div>
+          <Button
+            size="sm"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0"
+            asChild
+          >
+            <Link to="/kyc">Review Now</Link>
+          </Button>
+        </div>
+      )}
 
       {/* Recent Activity & Transactions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
