@@ -1,11 +1,24 @@
 import axios from "axios";
 
-let baseURL = "http://localhost:5000/api";
-if (import.meta.env.MODE === "production") {
-  baseURL = import.meta.env.VITE_API_URL;
-  console.log("Running in production");
-} else {
-  console.log("Running in development");
+// Resolve the API base URL.
+//
+// Previously this hardcoded `http://localhost:5000/api` for dev mode, but the
+// backend listens on port 5050 (see kolekto-be-old/app.js — `PORT || 5050`).
+// That mismatch meant every admin→backend call in local dev would fail with
+// "Network Error" and the FE would render "Could not reach the backend."
+//
+// Rules:
+//   - If VITE_API_URL is set in env (any mode), use it. This lets local devs
+//     point at staging/prod from .env without code changes.
+//   - Otherwise fall back to localhost:5050 (matches the backend default).
+const envApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const baseURL = envApiUrl && envApiUrl.length > 0
+  ? envApiUrl
+  : "http://localhost:5050/api";
+
+if (import.meta.env.MODE !== "production") {
+  // eslint-disable-next-line no-console
+  console.log(`[admin axios] baseURL = ${baseURL} (mode=${import.meta.env.MODE})`);
 }
 
 export const axiosInstance = axios.create({

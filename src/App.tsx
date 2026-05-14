@@ -22,6 +22,7 @@ import TransactionsPage from "./pages/TransactionsPage";
 import FundraisingPage from "./pages/FundraisingPage";
 import FundraisingDetailPage from "./pages/FundraisingDetailPage";
 import KYCDetailPage from "./pages/KYCDetailPage";
+import ReconcilePaymentPage from "./pages/ReconcilePaymentPage";
 
 const queryClient = new QueryClient();
 
@@ -49,6 +50,7 @@ const App = () => (
             <Route path="kyc/:userId" element={<KYCDetailPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="reconcile" element={<ReconcilePaymentPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
