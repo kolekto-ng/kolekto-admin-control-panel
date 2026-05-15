@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   ArrowLeftRight,
   Heart,
+  Wrench,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -86,6 +87,11 @@ export const Sidebar = () => {
       path: '/kyc',
       badge: pendingKyc > 0 ? pendingKyc : undefined,
       badgeColor: 'bg-indigo-500',
+    },
+    {
+      name: 'Reconcile',
+      icon: Wrench,
+      path: '/reconcile',
     },
     {
       name: 'Settings',
