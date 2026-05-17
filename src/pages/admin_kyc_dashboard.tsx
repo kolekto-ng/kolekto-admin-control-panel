@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -25,37 +26,44 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Check,
-  X,
-  Clock,
-  Eye,
-  AlertTriangle,
-  User,
-  FileText,
-  Shield,
-  Phone,
-  Mail,
-  MapPin,
-  Calendar,
-  CreditCard,
-  Building,
-  Download,
-  ExternalLink,
-  MessageSquare,
-  History,
+  Loader2,
   Search,
-  Filter
+  ShieldCheck,
+  Clock,
+  CheckCircle,
+  XCircle,
+  Eye,
+  AlertCircle,
 } from 'lucide-react';
-import { axiosInstance } from '@/lib/axios';
+import { formatDate } from '@/lib/formatters';
+import { useKYCStore, KYCStatus } from '@/stores/kycStore';
+import { useToast } from '@/components/ui/use-toast';
+
+const STATUS_CONFIG: Record<string, { label: string; className: string; icon: typeof CheckCircle }> = {
+  pending: {
+    label: 'Pending',
+    className: 'bg-amber-50 text-amber-700 border-amber-200',
+    icon: Clock,
+  },
+  reviewing: {
+    label: 'Reviewing',
+    className: 'bg-blue-50 text-blue-700 border-blue-200',
+    icon: Eye,
+  },
+  verified: {
+    label: 'Verified',
+    className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    icon: CheckCircle,
+  },
+  rejected: {
+    label: 'Rejected',
+    className: 'bg-red-50 text-red-700 border-red-200',
+    icon: XCircle,
+  },
+};
 
 const AdminKYCDashboard = () => {
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [selectedUserDetails, setSelectedUserDetails] = useState(null);
-  const [selectedUserLoading, setSelectedUserLoading] = useState(false);
-  const [showDocumentModal, setShowDocumentModal] = useState(false);
-  const [selectedDocument, setSelectedDocument] = useState(null);
-  const [verificationAction, setVerificationAction] = useState('');
-  const [adminNotes, setAdminNotes] = useState('');
+  const { kycUsers, stats, loading, error, fetchKYCList } = useKYCStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [users, setUsers] = useState([]);
@@ -68,32 +76,23 @@ const AdminKYCDashboard = () => {
       : import.meta.env.VITE_API_BASE_URL || "http://localhost:5050/api";
 
   useEffect(() => {
-    fetchKYCVerifications();
-  }, []);
+    fetchKYCList();
+  }, [fetchKYCList]);
 
-  const fetchKYCVerifications = () => {
-    setLoading(true);
-    axiosInstance.get(`/adminurlabdkole/kyc-verifications`)
-      .then(res => {
-        console.log(res.data);
-        setUsers(res.data.kycs || []);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error('Error fetching KYC verifications:', error);
-        setLoading(false);
-      });
-  };
+  useEffect(() => {
+    if (error) {
+      toast({ title: 'Error', description: error, variant: 'destructive' });
+    }
+  }, [error, toast]);
 
-  // Filter users based on search and status
-  const filteredUsers = users.filter(user => {
-    const profile = user.profile || {};
+  const filtered = kycUsers.filter((user) => {
     const matchesSearch =
-      (profile.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (profile.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (user.id || '').toLowerCase().includes(searchTerm.toLowerCase());
+      !searchTerm ||
+      user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (user.phone_number || '').includes(searchTerm);
 
-    const matchesStatus = filterStatus === 'all' || user.status === filterStatus;
+    const matchesStatus = statusFilter === 'all' || user.kyc_status === statusFilter;
 
     return matchesSearch && matchesStatus;
   });
@@ -329,100 +328,85 @@ const AdminKYCDashboard = () => {
 
   if (!selectedUser) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-muted-foreground">No users found matching your criteria.</p>
-      </div>
+      <Badge variant="outline" className={`text-xs font-medium ${cfg.className}`}>
+        <Icon className="h-3 w-3 mr-1" />
+        {cfg.label}
+      </Badge>
     );
-  }
+  };
 
-  if (!selectedUserDetails) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-muted-foreground">Loading user details...</p>
-      </div>
-    );
-  }
+  const statCards = [
+    {
+      label: 'Total Submissions',
+      value: stats.total,
+      icon: ShieldCheck,
+      iconClass: 'text-indigo-500',
+      bgClass: 'bg-indigo-50',
+    },
+    {
+      label: 'Pending Review',
+      value: stats.pending,
+      icon: Clock,
+      iconClass: 'text-amber-500',
+      bgClass: 'bg-amber-50',
+      highlight: stats.pending > 0,
+    },
+    {
+      label: 'Verified',
+      value: stats.verified,
+      icon: CheckCircle,
+      iconClass: 'text-emerald-500',
+      bgClass: 'bg-emerald-50',
+    },
+    {
+      label: 'Rejected',
+      value: stats.rejected,
+      icon: XCircle,
+      iconClass: 'text-red-500',
+      bgClass: 'bg-red-50',
+    },
+  ];
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Header with Back Button */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <Button variant="outline" onClick={() => setSelectedUser(null)}>
-            ← Back to List
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold">{selectedUserDetails?.personalInfo?.full_name}</h1>
-            <p className="text-muted-foreground">KYC Verification Review</p>
-          </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <ShieldCheck className="h-6 w-6 text-indigo-500" />
+            KYC Verification Management
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Review, approve, and manage user identity verifications.
+          </p>
         </div>
-        <div className="flex items-center space-x-2">
-          {getStatusBadge(selectedUserDetails?.kycStatus)}
-          {getRiskBadge(selectedUserDetails?.overallRiskScore || 75)}
-        </div>
+        <Button variant="outline" onClick={() => fetchKYCList()} disabled={loading}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+          Refresh
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Personal Info & Documents */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Personal Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <User className="h-5 w-5 mr-2" />
-                Personal Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center space-x-4">
-                <Avatar className="h-16 w-16">
-                  <AvatarImage src={selectedUserDetails.personalInfo?.avatar_url} />
-                  <AvatarFallback>
-                    {selectedUserDetails.personalInfo?.fullName?.split(' ').map(n => n[0]).join('') || 'U'}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="space-y-1">
-                  <h3 className="font-semibold text-lg">{selectedUserDetails.personalInfo?.fullName}</h3>
-                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                    <Mail className="h-4 w-4" />
-                    <span>{selectedUserDetails.personalInfo?.email}</span>
-                  </div>
-                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                    <Phone className="h-4 w-4" />
-                    <span>{selectedUserDetails.personalInfo?.phone}</span>
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium">Date of Birth</Label>
-                  <div className="flex items-center space-x-2 mt-1">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">
-                      {selectedUserDetails.personalInfo?.dateOfBirth
-                        ? new Date(selectedUserDetails.personalInfo.dateOfBirth).toLocaleDateString()
-                        : 'N/A'}
-                    </span>
-                  </div>
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {statCards.map((card) => (
+          <Card
+            key={card.label}
+            className={`border ${card.highlight ? 'border-amber-300 ring-1 ring-amber-200' : ''}`}
+          >
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`${card.bgClass} p-2 rounded-lg`}>
+                  <card.icon className={`h-5 w-5 ${card.iconClass}`} />
                 </div>
                 <div>
-                  <Label className="text-sm font-medium">User ID</Label>
-                  <p className="text-sm text-muted-foreground mt-1">{selectedUserDetails.id}</p>
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium">Address</Label>
-                <div className="flex items-center space-x-2 mt-1">
-                  <MapPin className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">{selectedUserDetails.personalInfo?.address || 'N/A'}</span>
+                  <p className="text-2xl font-bold">{card.value}</p>
+                  <p className="text-xs text-muted-foreground leading-tight">{card.label}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
+        ))}
+      </div>
 
           {/* Identity Documents */}
           <Card>
@@ -537,32 +521,31 @@ const AdminKYCDashboard = () => {
 
 
         </div>
+      )}
 
-        {/* Right Column - Sidebar Info */}
-        <div className="space-y-6">
-
-          {/* Admin Notes */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Admin Notes</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Textarea
-                placeholder="Add notes about this verification..."
-                value={adminNotes}
-                onChange={(e) => setAdminNotes(e.target.value)}
-                rows={4}
-              />
-              <Button
-                className="w-full"
-                onClick={() => handleVerificationAction({ action: 'add_note', verificationType: 'identity' })}
-                disabled={actionLoading}
-              >
-                {actionLoading ? 'Saving...' : 'Save Note'}
-              </Button>
-            </CardContent>
-          </Card>
+      {/* Filters */}
+      <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, email or phone..."
+            className="pl-10 w-full"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="reviewing">Reviewing</SelectItem>
+            <SelectItem value="verified">Verified</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Document Modal */}

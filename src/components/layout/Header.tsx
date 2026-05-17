@@ -1,7 +1,7 @@
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, User, Settings, LogOut } from 'lucide-react';
+import { Bell, User, Settings, LogOut, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -12,19 +12,48 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuthStore } from '@/stores/authStore';
 
 export const Header = () => {
   const [notificationsCount, setNotificationsCount] = useState(3); // For demo purposes
+  const [signingOut, setSigningOut] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signOut, user } = useAuthStore();
 
-  const handleLogout = () => {
-    toast({
-      title: "Logged out",
-      description: "You have been logged out successfully.",
-    });
-    navigate('/login');
+  // Previously this only showed a toast and called navigate('/login'),
+  // leaving the Supabase session intact in localStorage. On the next render
+  // or refresh, AdminLayout's `initialize()` would restore the session and
+  // bounce the user back to the dashboard, making logout appear to "not
+  // work". We now actually clear the session via the auth store before
+  // navigating.
+  const handleLogout = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+      toast({
+        title: 'Logged out',
+        description: 'You have been logged out successfully.',
+      });
+      navigate('/login', { replace: true });
+    } catch (err: any) {
+      toast({
+        title: 'Sign-out failed',
+        description: err?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSigningOut(false);
+    }
   };
+
+  // Display name: prefer the Supabase user_metadata.full_name, fall back to
+  // email local-part, then "Admin User" so the header still looks right.
+  const displayName =
+    (user?.user_metadata as any)?.full_name ||
+    (user?.email ? user.email.split('@')[0] : 'Admin User');
+  const initial = (displayName || 'A').charAt(0).toUpperCase();
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200 h-16 flex items-center px-4 md:px-6">
@@ -79,9 +108,9 @@ export const Header = () => {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <div className="relative flex items-center gap-2 cursor-pointer">
-              <span className="hidden md:inline text-sm font-medium">Admin User</span>
+              <span className="hidden md:inline text-sm font-medium">{displayName}</span>
               <div className="w-8 h-8 rounded-full bg-kolekto-orange text-white flex items-center justify-center">
-                A
+                {initial}
               </div>
             </div>
           </DropdownMenuTrigger>
@@ -99,9 +128,17 @@ export const Header = () => {
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleLogout} className="flex items-center text-status-error">
-              <LogOut className="mr-2 h-4 w-4" />
-              <span>Logout</span>
+            <DropdownMenuItem
+              onClick={handleLogout}
+              disabled={signingOut}
+              className="flex items-center text-status-error"
+            >
+              {signingOut ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <LogOut className="mr-2 h-4 w-4" />
+              )}
+              <span>{signingOut ? 'Signing out…' : 'Logout'}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

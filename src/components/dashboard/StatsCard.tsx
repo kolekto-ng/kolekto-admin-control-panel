@@ -7,10 +7,12 @@ import {
   Wallet, 
   Check, 
   Clock, 
-  AlertCircle
+  AlertCircle,
+  Heart,
+  Shield
 } from 'lucide-react';
 
-type IconName = 'users' | 'folders' | 'coins' | 'wallet' | 'check' | 'clock' | 'alert-circle';
+type IconName = 'users' | 'folders' | 'coins' | 'wallet' | 'check' | 'clock' | 'alert-circle' | 'heart' | 'shield';
 type TrendDirection = 'up' | 'down' | 'stable';
 type Variant = 'default' | 'success' | 'warning' | 'danger';
 
@@ -44,6 +46,8 @@ export const StatsCard = ({
       case 'check': return <Check className="h-5 w-5" />;
       case 'clock': return <Clock className="h-5 w-5" />;
       case 'alert-circle': return <AlertCircle className="h-5 w-5" />;
+      case 'heart': return <Heart className="h-5 w-5" />;
+      case 'shield': return <Shield className="h-5 w-5" />;
     }
   };
 

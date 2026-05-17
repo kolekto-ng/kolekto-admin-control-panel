@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
 
+export type VerificationStatus = "verified" | "pending" | "rejected" | "unverified";
+
 export interface User {
   id: string;
   name: string;
@@ -10,6 +12,8 @@ export interface User {
   collections: number;
   totalRaised: number;
   status: "active" | "inactive";
+  verificationStatus: VerificationStatus;
+  dateOfBirth: string | null;
 }
 
 interface UsersState {
@@ -20,18 +24,6 @@ interface UsersState {
   getUserById: (id: string) => User | undefined;
 }
 
-// Demo user data
-const demoUser: User = {
-  id: "demo-user-001",
-  name: "John Doe",
-  email: "john.doe@demo.com",
-  phone: "+234 801 234 5678",
-  joinDate: new Date().toISOString(),
-  collections: 3,
-  totalRaised: 125000,
-  status: "active",
-};
-
 export const useUsersStore = create<UsersState>((set, get) => ({
   users: [],
   loading: false,
@@ -41,68 +33,71 @@ export const useUsersStore = create<UsersState>((set, get) => ({
     set({ loading: true, error: null });
 
     try {
+      // Fetch profiles
       const { data: profilesData, error } = await supabase
         .from("profiles")
         .select("*, collections(*, wallets(net_payment))")
         .order("created_at", { ascending: false });
-        console.log(profilesData) 
-      if (error) {
-        throw error;
+
+      if (error) throw error;
+
+      if (!profilesData || profilesData.length === 0) {
+        set({ users: [], loading: false });
+        return;
       }
 
-      let usersWithStats: User[] = [];
+      const userIds = profilesData.map((p) => p.id);
 
-      if (profilesData && profilesData.length > 0) {
-        // Get collection stats for each user
-        usersWithStats = await Promise.all(
-          profilesData.map(async (profile) => {
-            
-            // Get total raised amount from wallets (net_payment represents actual collected amount)
-            // const { data: walletsData } = await supabase
-            //   .from("wallets")
-            //   .select("net_payment, collection_id")
-            //   .in(
-            //     "collection_id",
-            //     await supabase
-            //       .from("collections")
-            //       .select("id")
-            //       .eq("user_id", profile.id)
-            //       .then(({ data }) => data?.map((c) => c.id) || [])
-            //   );
-         
-            // const totalRaised =
-            //   walletsData?.reduce(
-            //     (sum, wallet) => sum + (Number(wallet.net_payment) || 0),
-            //     0
-            //   ) || 0;
+      // Batch fetch KYC verification statuses
+      const { data: kycData } = await supabase
+        .from("kyc_verifications")
+        .select("user_id, status")
+        .in("user_id", userIds);
 
-            return {
-              id: profile.id,
-              name: profile.full_name || "Unknown User",
-              email: profile.email,
-              phone: profile.phone_number || "",
-              joinDate: profile.created_at || "",
-              collections: profile.collections.length || 0,
-              totalRaised: 0,
-              status: "active" as const,
-            };
-          })
-        );
-      }
-
-      // Add demo user to the beginning of the list
-      const allUsers = [...usersWithStats];
-
-      set({
-        users: allUsers,
-        loading: false,
+      const kycMap: Record<string, string> = {};
+      (kycData || []).forEach((k) => {
+        kycMap[k.user_id] = k.status;
       });
+
+      // Get collection counts per user
+      const { data: collectionsData } = await supabase
+        .from("collections")
+        .select("user_id")
+        .in("user_id", userIds);
+
+      const collectionCountMap: Record<string, number> = {};
+      (collectionsData || []).forEach((c) => {
+        collectionCountMap[c.user_id] = (collectionCountMap[c.user_id] || 0) + 1;
+      });
+
+      // Build user list
+      const usersWithStats: User[] = profilesData.map((profile) => {
+        const kycStatus = kycMap[profile.id];
+        let verificationStatus: VerificationStatus = "unverified";
+        if (kycStatus === "verified") verificationStatus = "verified";
+        else if (kycStatus === "pending" || kycStatus === "reviewing") verificationStatus = "pending";
+        else if (kycStatus === "rejected") verificationStatus = "rejected";
+
+        return {
+          id: profile.id,
+          name: profile.full_name || "Unknown User",
+          email: profile.email,
+          phone: profile.phone_number || "",
+          joinDate: profile.created_at || "",
+          collections: collectionCountMap[profile.id] || 0,
+          totalRaised: 0,
+          status: "active" as const,
+          verificationStatus,
+          dateOfBirth: profile.date_of_birth || null,
+        };
+      });
+
+      set({ users: usersWithStats, loading: false });
     } catch (error) {
       console.error("Error fetching users:", error);
-      // If there's an error, still show the demo user
       set({
-        users: [demoUser],
-        error: "Failed to load users from database, showing demo data",
+        users: [],
+        error: "Failed to load users from database",
         loading: false,
       });
     }

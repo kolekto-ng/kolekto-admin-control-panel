@@ -19,6 +19,10 @@ import LoginPage from "./pages/LoginPage";
 import NotFound from "./pages/NotFound";
 import AdminKYCDashboard from "./pages/admin_kyc_dashboard";
 import TransactionsPage from "./pages/TransactionsPage";
+import FundraisingPage from "./pages/FundraisingPage";
+import FundraisingDetailPage from "./pages/FundraisingDetailPage";
+import KYCDetailPage from "./pages/KYCDetailPage";
+import ReconcilePaymentPage from "./pages/ReconcilePaymentPage";
 
 const queryClient = new QueryClient();
 
@@ -38,11 +42,15 @@ const App = () => (
             <Route path="collections/:id" element={<CollectionDetailPage />} />
             <Route path="withdrawals" element={<WithdrawalsPage />} />
             <Route path="withdrawals/:id" element={<WithdrawalDetailPage />} />
+            <Route path="fundraising" element={<FundraisingPage />} />
+            <Route path="fundraising/:id" element={<FundraisingDetailPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="kyc" element={<AdminKYCDashboard />} />
+            <Route path="kyc/:userId" element={<KYCDetailPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="reconcile" element={<ReconcilePaymentPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

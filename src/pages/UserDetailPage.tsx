@@ -10,6 +10,10 @@ import {
   Clock,
   ArrowUpRight,
   Hourglass,
+  ShieldCheck,
+  ShieldOff,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +32,7 @@ interface UserStats {
   totalWithdrawn: number;
   pendingWithdrawal: number;
   pendingBalance: number;
+  totalRaised: number;
 }
 
 interface ActivityLogItem {
@@ -37,16 +42,26 @@ interface ActivityLogItem {
   date: string;
 }
 
+const VERIFICATION_BADGES: Record<string, { label: string; className: string; icon: typeof CheckCircle }> = {
+  verified: { label: 'Verified', className: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle },
+  pending: { label: 'KYC Pending', className: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock },
+  reviewing: { label: 'KYC Reviewing', className: 'bg-blue-50 text-blue-700 border-blue-200', icon: ShieldCheck },
+  rejected: { label: 'KYC Rejected', className: 'bg-red-50 text-red-700 border-red-200', icon: XCircle },
+  unverified: { label: 'Unverified', className: 'bg-gray-100 text-gray-500 border-gray-200', icon: ShieldOff },
+};
+
 const UserDetailPage = () => {
   const { id } = useParams();
   const [user, setUser] = useState<any>(null);
   const [collections, setCollections] = useState<any[]>([]);
+  const [verificationStatus, setVerificationStatus] = useState<string>('unverified');
   const [stats, setStats] = useState<UserStats>({
     availableBalance: 0,
     accountBalance: 0,
     totalWithdrawn: 0,
     pendingWithdrawal: 0,
     pendingBalance: 0,
+    totalRaised: 0,
   });
   const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +83,15 @@ const UserDetailPage = () => {
       if (foundUser) {
         setUser(foundUser);
 
+        // Fetch KYC verification status
+        const { data: kycData } = await supabase
+          .from("kyc_verifications")
+          .select("status")
+          .eq("user_id", id)
+          .single();
+        setVerificationStatus(kycData?.status || 'unverified');
+
+
         // 1. Fetch User's Collections
         const { data: userCollections } = await supabase
           .from("collections")
@@ -80,18 +104,31 @@ const UserDetailPage = () => {
         // 2. Fetch User's Wallets (via collections) to get Balance
         let availableBalance = 0;
         let ledgerBalance = 0;
+        let pendingBalance = 0;
+        let netPayment = 0; // Total Raised across all user's collections
 
         if (userCollections && userCollections.length > 0) {
           const collectionIds = userCollections.map((c) => c.id);
           const { data: wallets } = await supabase
             .from("wallets")
-            .select("available_balance, ledger_balance")
-            .in("collection_id", collectionIds);
+            .select("collection_id, net_payment, available_balance, pending_balance, ledger_balance, updated_at")
+            .in("collection_id", collectionIds)
+            .order("updated_at", { ascending: false });
 
           if (wallets) {
-            wallets.forEach((w) => {
-              availableBalance += w.available_balance || 0;
-              ledgerBalance += w.ledger_balance || 0;
+            // Deduplicate by collection_id (legacy data may have multiple
+            // wallet rows per collection). Keep the most recent row.
+            const latestByCollection: Record<string, any> = {};
+            wallets.forEach((w: any) => {
+              if (!latestByCollection[w.collection_id]) {
+                latestByCollection[w.collection_id] = w;
+              }
+            });
+            Object.values(latestByCollection).forEach((w: any) => {
+              availableBalance += Number(w.available_balance || 0);
+              ledgerBalance += Number(w.ledger_balance || 0);
+              pendingBalance += Number(w.pending_balance || 0);
+              netPayment += Number(w.net_payment || 0);
             });
           }
         }
@@ -127,13 +164,14 @@ const UserDetailPage = () => {
           });
         }
 
-        // Calculate Pending Balance (Incoming Funds)
-        // Ledger - Available includes: "Incoming Pending" + "Pending Withdrawals" + "Approved (Processing) Withdrawals"
-        // So Incoming = (Ledger - Available) - PendingWithdrawal - ApprovedWithdrawals(Processing)
-        let pendingBalance = Math.max(0, (ledgerBalance - availableBalance) - pendingWithdrawal - approvedButNotLedgerDeducted);
-
-        // Account Balance = Available + Pending (Incoming)
-        let accountBalance = availableBalance + pendingBalance;
+        // Canonical balance definitions (per product spec):
+        //   pending_balance = T+1 incoming funds not yet settled (from wallets table)
+        //   available_balance = settled funds withdrawable now
+        //   ledger_balance (Total Balance) = available + pending
+        //   net_payment = Total Raised (sum of all received funds, net of fees)
+        // Withdrawal states are separate concerns tracked below.
+        const accountBalance = ledgerBalance; // Total Balance = available + pending
+        void pendingWithdrawal; void approvedButNotLedgerDeducted; // tracked but not used for balance math
 
         setStats({
           availableBalance,
@@ -141,6 +179,7 @@ const UserDetailPage = () => {
           totalWithdrawn,
           pendingWithdrawal,
           pendingBalance,
+          totalRaised: netPayment,
         });
 
         // 4. Generate Activity Log
@@ -277,10 +316,28 @@ const UserDetailPage = () => {
 
             <div className="text-center mb-4">
               <h3 className="text-lg font-semibold">{user.name}</h3>
-              <div className="mt-1">
+              <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
                 <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Active</Badge>
+                {(() => {
+                  const cfg = VERIFICATION_BADGES[verificationStatus] || VERIFICATION_BADGES['unverified'];
+                  const Icon = cfg.icon;
+                  return (
+                    <Badge variant="outline" className={`text-xs font-medium ${cfg.className}`}>
+                      <Icon className="h-3 w-3 mr-1" />
+                      {cfg.label}
+                    </Badge>
+                  );
+                })()}
               </div>
             </div>
+
+            {/* View KYC Button */}
+            <Button variant="outline" size="sm" className="w-full" asChild>
+              <Link to={`/kyc/${user.id}`}>
+                <ShieldCheck className="h-4 w-4 mr-1.5" />
+                View KYC Details
+              </Link>
+            </Button>
 
             <div className="space-y-3">
               <div className="flex items-center">

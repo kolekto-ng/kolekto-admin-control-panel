@@ -34,9 +34,10 @@ interface CollectionDetail {
   description: string;
   status: string;
   created_at: string;
-  amount: number; // Target amount or Fixed Price
-  total_contributions: number; // Raised amount usually from DB aggregate
-  type: string; // Pricing type: 'fixed', 'tier', etc.
+  amount: number;
+  total_contributions: number;
+  type: string;
+  collection_type: string | null;
   max_contributions: number | null;
   user_id: string;
   currency: string;
@@ -45,6 +46,28 @@ interface CollectionDetail {
   deadline: string | null;
   support_phone_number?: string | null;
   total_contributions_count?: number;
+  currency_symbol: string;
+  contributions_fields: any;
+  price_tiers: any;
+  deadline: string | null;
+  support_phone_number: string | null;
+  // New fields
+  slug: string | null;
+  rejection_reason: string | null;
+  min_contribution: number | null;
+  target_amount: number | null;
+  event_date: string | null;
+  ticket_mode: string | null;
+  allow_multiple_quantity: boolean | null;
+  is_open_ended: boolean | null;
+  auto_close: boolean | null;
+  campaign_category: string | null;
+  campaign_summary: string | null;
+  campaign_country: string | null;
+  social_links: any;
+  banner_url: string | null;
+  story: any;
+  unique_id_enabled: boolean | null;
 }
 
 const CollectionDetailPage = () => {
@@ -99,14 +122,17 @@ const CollectionDetailPage = () => {
 
       setWithdrawals(withdrawalsData || []);
 
-      // 5. Fetch Wallet
-      const { data: walletData } = await supabase
+      // 5. Fetch Wallet — order by updated_at and limit 1 because legacy
+      // data may contain duplicate wallet rows for the same collection
+      // (missing UNIQUE constraint on wallets.collection_id).
+      const { data: walletRows } = await supabase
         .from('wallets')
         .select('*')
         .eq('collection_id', id)
-        .maybeSingle();
+        .order('updated_at', { ascending: false })
+        .limit(1);
 
-      setWallet(walletData);
+      setWallet((walletRows && walletRows[0]) || null);
 
     } catch (error) {
       console.error('Failed to load collection data:', error);
@@ -165,8 +191,13 @@ const CollectionDetailPage = () => {
   const raisedAmount = grossRaised; // Gross amount for progress and display
   const targetAmount = collection.amount || 0;
   const progressPercentage = targetAmount > 0 ? Math.min(100, Math.round((raisedAmount / targetAmount) * 100)) : 0;
+  // Total Raised = total amount ever received for this collection (net of fees).
+  // Authoritative source = sum of paid contributions. Fall back to wallet.net_payment.
+  const paidContributors = contributors.filter(c => c.status === 'success' || c.status === 'paid');
+  const contributionsSum = paidContributors.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  const raisedAmount = contributionsSum > 0 ? contributionsSum : Number(wallet?.net_payment || 0);
   const isLimited = collection.max_contributions !== null;
-  const contributorCount = contributors.filter(c => c.status === 'success' || c.status === 'paid').length;
+  const contributorCount = paidContributors.length;
   const displayContributorCount = collection.total_contributions > contributorCount ? collection.total_contributions : contributorCount;
 
   // Financial Stats with 5 AM Settlement Rule
@@ -197,11 +228,33 @@ const CollectionDetailPage = () => {
   const isFixed = typeLower.includes('fixed');
   const isTiered = typeLower.includes('tier');
   const isFundraiser = typeLower.includes('fund');
+  // Financial Stats from Wallet (canonical definitions):
+  //   - Total Balance    = ledger_balance    (total raised minus completed withdrawals)
+  //   - Available        = available_balance (settled past T+1, withdrawable now)
+  //   - Pending          = pending_balance   (received today, settles at 5am WAT next day)
+  //   - Total Withdrawn  = withdrawn         (sum of completed withdrawals)
+  const availableBalance = Number(wallet?.available_balance || 0);
+  const pendingBalance = Number(wallet?.pending_balance || 0);
+  const ledgerBalance = Number(wallet?.ledger_balance || (availableBalance + pendingBalance));
+  const totalBalance = ledgerBalance; // "Total Balance" per product definition
+  const totalWithdrawn = Number(wallet?.withdrawn || 0);
+
+  // Type determination — use collection_type first (canonical), fall back to type
+  const canonicalType = (collection.collection_type || collection.type || 'fixed').toLowerCase();
+  const isFixed = canonicalType === 'fixed' || canonicalType === 'flat';
+  const isTiered = canonicalType === 'tiered';
+  const isFundraiser = canonicalType === 'fundraising';
+  const isTicket = canonicalType === 'ticket';
+  const isOpenPool = canonicalType === 'open_pool';
+  const isRejected = collection.status === 'rejected';
+  // For fundraising, use target_amount preferentially
+  const displayTargetAmount = collection.target_amount || collection.amount || 0;
+  const progressPercentage = displayTargetAmount > 0 ? Math.min(100, Math.round((raisedAmount / displayTargetAmount) * 100)) : 0;
 
   // Tier parsing logic update
   let tiers: any[] = [];
   try {
-    if (isTiered) {
+    if (isTiered || isTicket) {
       // Priority 1: price_tiers column (New correct location)
       if (collection.price_tiers && Array.isArray(collection.price_tiers)) {
         tiers = collection.price_tiers;
@@ -269,15 +322,26 @@ const CollectionDetailPage = () => {
           </Button>
           <div className="flex flex-col">
             <h1 className="text-2xl font-bold tracking-tight">{collection.title}</h1>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               {getStatusBadge(collection.status)}
-              <Badge variant="outline" className="capitalize">{collection.type}</Badge>
+              <Badge variant="outline" className="capitalize">
+                {collection.collection_type || collection.type}
+              </Badge>
+              {collection.campaign_category && (
+                <Badge variant="secondary" className="text-xs">{collection.campaign_category}</Badge>
+              )}
             </div>
           </div>
         </div>
         <div className="flex space-x-2">
           <Button variant="outline" asChild>
-            <a href={`https://test.kolekto.com.ng/contribute/${id}`} target="_blank" rel="noopener noreferrer">
+            <a
+              href={collection.slug
+                ? `https://kolekto.com.ng/c/${collection.slug}`
+                : `https://kolekto.com.ng/contribute/${id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               <LinkIcon className="h-4 w-4 mr-2" />
               View Public Page
             </a>
@@ -337,6 +401,22 @@ const CollectionDetailPage = () => {
                   </div>
                 </div>
 
+                {/* Rejection Reason Alert */}
+                {isRejected && collection.rejection_reason && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 md:col-span-2">
+                    <p className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-1">Rejection Reason</p>
+                    <p className="text-sm text-red-700">{collection.rejection_reason}</p>
+                  </div>
+                )}
+
+                {/* Slug display */}
+                {collection.slug && (
+                  <div className="bg-muted/30 p-3 rounded-lg md:col-span-2">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Public Slug</div>
+                    <code className="text-sm font-mono text-primary">/c/{collection.slug}</code>
+                  </div>
+                )}
+
                 {/* Pricing Section */}
                 <div className="bg-muted/30 p-4 rounded-lg md:col-span-2">
                   <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Pricing & Type</div>
@@ -344,27 +424,114 @@ const CollectionDetailPage = () => {
                   {isFixed && (
                     <div className="flex items-center">
                       <span className="font-medium text-lg">{formatCurrency(collection.amount)}</span>
-                      <span className="ml-2 text-sm text-muted-foreground">(Fixed Price)</span>
+                      <span className="ml-2 text-sm text-muted-foreground">(Fixed Price per contributor)</span>
                     </div>
                   )}
 
                   {isFundraiser && (
-                    <div>
-                      <div className="flex items-center mb-1">
-                        <span className="font-medium">{formatCurrency(collection.amount)}</span>
+                    <div className="space-y-1">
+                      <div className="flex items-center">
+                        <span className="font-medium">{displayTargetAmount > 0 ? formatCurrency(displayTargetAmount) : 'Open-ended'}</span>
                         <span className="ml-2 text-sm text-muted-foreground">(Target Goal)</span>
                       </div>
-                      <div className="text-xs text-muted-foreground">Minimum Contribution: {formatCurrency(0)} (Open)</div>
+                      {collection.min_contribution && (
+                        <div className="text-xs text-muted-foreground">Min Contribution: {formatCurrency(collection.min_contribution)}</div>
+                      )}
+                      {collection.campaign_summary && (
+                        <div className="text-sm text-gray-600 mt-2 bg-white p-2 rounded border">{collection.campaign_summary}</div>
+                      )}
+                      {collection.campaign_country && (
+                        <div className="text-xs text-muted-foreground">Country: {collection.campaign_country}</div>
+                      )}
                     </div>
                   )}
 
-                  {isTiered && (
+                  {isTicket && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Ticket Type:</span>
+                        <Badge variant="secondary" className="capitalize text-xs">{tiers.length > 0 ? 'Tiered' : 'Fixed'}</Badge>
+                      </div>
+                      {collection.event_date && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Event Date:</span>
+                          <span className="font-medium text-sm">{formatDate(collection.event_date)}</span>
+                        </div>
+                      )}
+                      {collection.ticket_mode && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Ticket Mode:</span>
+                          <Badge variant="outline" className="capitalize text-xs">{collection.ticket_mode}</Badge>
+                        </div>
+                      )}
+                      
+                      {tiers.length === 0 && (
+                        <div className="mt-3 p-3 bg-white rounded border flex items-center justify-between">
+                          <div>
+                            <span className="font-medium text-lg">{formatCurrency(collection.amount || 0)}</span>
+                            <p className="text-xs text-muted-foreground">Fixed Ticket Price</p>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-medium">{displayContributorCount}</span>
+                            <p className="text-xs text-muted-foreground">Tickets Sold</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {tiers.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-sm font-medium mb-2">Ticket Tiers:</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {contributorsPerTier.map((tier, idx) => (
+                              <div key={idx} className="flex justify-between items-center bg-white p-2 rounded border text-sm">
+                                <div>
+                                  <span>{tier.name || `Tier ${idx + 1}`}</span>
+                                  <div className="text-xs text-muted-foreground">{tier.count} sold</div>
+                                </div>
+                                <span className="font-bold">{formatCurrency(tier.price || tier.amount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {isOpenPool && (
+                    <div className="space-y-1">
+                      {displayTargetAmount > 0 && (
+                        <div className="flex items-center">
+                          <span className="font-medium">{formatCurrency(displayTargetAmount)}</span>
+                          <span className="ml-2 text-sm text-muted-foreground">(Target Goal)</span>
+                        </div>
+                      )}
+                      {collection.min_contribution && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-muted-foreground">Min Contribution:</span>
+                          <span className="font-medium">{formatCurrency(collection.min_contribution)}</span>
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground">
+                        Type: {collection.is_open_ended ? '♾ Open-ended (no deadline)' : '📅 Has deadline'}
+                      </div>
+                      {collection.auto_close !== null && (
+                        <div className="text-xs text-muted-foreground">
+                          Auto-close when target reached: {collection.auto_close ? 'Yes' : 'No'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {isTiered && !isTicket && (
                     <div className="mt-2">
                       <p className="text-sm font-medium mb-2">Available Tiers:</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {tiers.map((tier, idx) => (
+                        {contributorsPerTier.map((tier, idx) => (
                           <div key={idx} className="flex justify-between items-center bg-white p-2 rounded border text-sm">
-                            <span>{tier.name || `Tier ${idx + 1}`}</span>
+                            <div>
+                              <span>{tier.name || `Tier ${idx + 1}`}</span>
+                              <div className="text-xs text-muted-foreground">{tier.count} contributors</div>
+                            </div>
                             <span className="font-bold">{formatCurrency(tier.price || tier.amount)}</span>
                           </div>
                         ))}
@@ -379,7 +546,7 @@ const CollectionDetailPage = () => {
 
           <Tabs defaultValue="contributors">
             <TabsList>
-              <TabsTrigger value="contributors">Contributors ({contributors.length})</TabsTrigger>
+              <TabsTrigger value="contributors">Contributors ({contributorCount})</TabsTrigger>
               <TabsTrigger value="withdrawals">Withdrawals ({withdrawals.length})</TabsTrigger>
               <TabsTrigger value="activity">Activity Log</TabsTrigger>
             </TabsList>
@@ -508,26 +675,30 @@ const CollectionDetailPage = () => {
                   <span className="text-muted-foreground">Total Raised</span>
                   <span className="font-bold text-lg">{formatCurrency(raisedAmount)}</span>
                 </div>
-                <div className="flex justify-between text-sm mb-2 border-b pb-2">
-                  <span className="text-muted-foreground">Total Balance</span>
-                  <span className="font-bold text-lg text-primary">{formatCurrency(totalBalance)}</span>
-                </div>
-                {isFundraiser && targetAmount > 0 && (
+                {(isFundraiser || isOpenPool) && displayTargetAmount > 0 && (
                   <>
                     <Progress value={progressPercentage} className="h-2 mb-1" />
-                    <div className="text-xs text-right text-muted-foreground">{progressPercentage}% of {formatCurrency(targetAmount)}</div>
+                    <div className="text-xs text-right text-muted-foreground">{progressPercentage}% of {formatCurrency(displayTargetAmount)}</div>
                   </>
                 )}
               </div>
 
               <div className="pt-4 border-t space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Available for Withdrawal</span>
+                  <span className="text-sm text-muted-foreground">Total Balance</span>
+                  <span className="font-medium">{formatCurrency(totalBalance)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Available</span>
                   <span className="font-medium text-green-600">{formatCurrency(availableBalance)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Pending</span>
+                  <span className="text-sm text-muted-foreground">Pending (T+1)</span>
                   <span className="font-medium text-amber-600">{formatCurrency(pendingBalance)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Total Withdrawn</span>
+                  <span className="font-medium">{formatCurrency(totalWithdrawn)}</span>
                 </div>
 
                 <div className="flex justify-between items-center pt-2">
@@ -540,14 +711,14 @@ const CollectionDetailPage = () => {
                 </div>
 
                 {/* Tier Breakdown */}
-                {isTiered && contributorsPerTier.length > 0 && (
+                {(isTiered || (isTicket && tiers.length > 0)) && contributorsPerTier.length > 0 && (
                   <div className="pt-2">
                     <p className="text-xs font-semibold text-muted-foreground mb-2">Contributors per Tier</p>
                     <div className="space-y-1">
                       {contributorsPerTier.map((t, idx) => (
-                        <div key={idx} className="flex justify-between text-xs">
-                          <span>{t.name}</span>
-                          <span>{t.count}</span>
+                        <div key={idx} className="flex justify-between text-xs items-center">
+                          <span>{t.name} <span className="text-muted-foreground">({formatCurrency(t.price || t.amount)})</span></span>
+                          <span className="font-medium">{t.count}</span>
                         </div>
                       ))}
                     </div>
