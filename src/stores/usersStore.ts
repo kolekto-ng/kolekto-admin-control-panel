@@ -43,9 +43,9 @@ export const useUsersStore = create<UsersState>((set, get) => ({
     try {
       const { data: profilesData, error } = await supabase
         .from("profiles")
-        .select("*")
+        .select("*, collections(*, wallets(net_payment))")
         .order("created_at", { ascending: false });
-
+        console.log(profilesData) 
       if (error) {
         throw error;
       }
@@ -56,30 +56,25 @@ export const useUsersStore = create<UsersState>((set, get) => ({
         // Get collection stats for each user
         usersWithStats = await Promise.all(
           profilesData.map(async (profile) => {
-            // Get collections count
-            const { count: collectionsCount } = await supabase
-              .from("collections")
-              .select("*", { count: "exact", head: true })
-              .eq("user_id", profile.id);
-
+            
             // Get total raised amount from wallets (net_payment represents actual collected amount)
-            const { data: walletsData } = await supabase
-              .from("wallets")
-              .select("net_payment, collection_id")
-              .in(
-                "collection_id",
-                await supabase
-                  .from("collections")
-                  .select("id")
-                  .eq("user_id", profile.id)
-                  .then(({ data }) => data?.map((c) => c.id) || [])
-              );
-
-            const totalRaised =
-              walletsData?.reduce(
-                (sum, wallet) => sum + (Number(wallet.net_payment) || 0),
-                0
-              ) || 0;
+            // const { data: walletsData } = await supabase
+            //   .from("wallets")
+            //   .select("net_payment, collection_id")
+            //   .in(
+            //     "collection_id",
+            //     await supabase
+            //       .from("collections")
+            //       .select("id")
+            //       .eq("user_id", profile.id)
+            //       .then(({ data }) => data?.map((c) => c.id) || [])
+            //   );
+         
+            // const totalRaised =
+            //   walletsData?.reduce(
+            //     (sum, wallet) => sum + (Number(wallet.net_payment) || 0),
+            //     0
+            //   ) || 0;
 
             return {
               id: profile.id,
@@ -87,8 +82,8 @@ export const useUsersStore = create<UsersState>((set, get) => ({
               email: profile.email,
               phone: profile.phone_number || "",
               joinDate: profile.created_at || "",
-              collections: collectionsCount || 0,
-              totalRaised,
+              collections: profile.collections.length || 0,
+              totalRaised: 0,
               status: "active" as const,
             };
           })

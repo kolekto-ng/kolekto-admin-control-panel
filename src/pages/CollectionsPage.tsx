@@ -126,6 +126,9 @@ const CollectionsPage = () => {
                   <th>Type</th>
                   <th>Organizer</th>
                   <th>Amount Raised</th>
+                  <th>Balance</th>
+                  <th>Available</th>
+                  <th>Pending</th>
                   <th>Contributors</th>
                   <th>Status</th>
                   <th>Created</th>
@@ -150,6 +153,9 @@ const CollectionsPage = () => {
                         </Button>
                       </td>
                       <td>{formatCurrency(collection.raisedAmount)}</td>
+                      <td>{formatCurrency(collection.totalBalance)}</td>
+                      <td>{formatCurrency(collection.availableBalance)}</td>
+                      <td>{formatCurrency(collection.pendingBalance)}</td>
                       <td>{collection.contributors}</td>
                       <td>{getStatusBadge(collection.status)}</td>
                       <td>{formatDate(collection.createdAt)}</td>

@@ -10,6 +10,9 @@ export interface Collection {
   userId: string;
   targetAmount: number;
   raisedAmount: number;
+  totalBalance: number;
+  availableBalance: number;
+  pendingBalance: number;
   contributors: number;
   status: "active" | "completed" | "paused";
   type: string;
@@ -84,11 +87,13 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
             organizer: organizerName,
             userId: collection.user_id,
             targetAmount: Number(collection.amount),
-            raisedAmount: Number(wallet?.[0]?.ledger_balance || 0),
+            raisedAmount: Number(collection.total_contributions || 0), // Use the aggregate from DB if available, or we'll need to sum it
+            totalBalance: Number(wallet?.[0]?.ledger_balance || 0),
             totalWithdrawn: Number(wallet?.[0]?.withdrawn || 0),
             wallet: wallet,
             availableBalance: Number(wallet?.[0]?.available_balance || 0),
-            contributors: +collection.total_contributions || 0,
+            pendingBalance: Number(wallet?.[0]?.ledger_balance || 0) - Number(wallet?.[0]?.available_balance || 0),
+            contributors: +collection.total_contributions_count || +collection.total_contributions || 0,
             status: collection.status,
             type: collection.type,
             deadline: collection.deadline || "",

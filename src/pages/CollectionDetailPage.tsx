@@ -18,6 +18,7 @@ interface Contributor {
   created_at: string;
   email: string;
   status: string;
+  contributor_information?: any;
 }
 
 interface Withdrawal {
@@ -40,9 +41,10 @@ interface CollectionDetail {
   user_id: string;
   currency: string;
   contributions_fields: any; // JSON
-  price_tiers: any; // JSON column in DB for tiers
+  price_tiers?: any; // JSON column in DB for tiers
   deadline: string | null;
-  support_phone_number: string | null;
+  support_phone_number?: string | null;
+  total_contributions_count?: number;
 }
 
 const CollectionDetailPage = () => {
@@ -156,17 +158,39 @@ const CollectionDetailPage = () => {
   }
 
   // Calculations
-  const raisedAmount = wallet?.ledger_balance || contributors.reduce((sum, c) => sum + (c.status === 'success' || c.status === 'paid' ? c.amount : 0), 0) || 0;
+  const grossRaised = contributors.reduce((sum, c) => (c.status === 'success' || c.status === 'paid' ? sum + c.amount : sum), 0);
+  const totalWithdrawn = withdrawals.reduce((sum, w) => (w.status === 'approved' || w.status === 'success' ? sum + w.amount : sum), 0);
+  const totalBalance = wallet?.ledger_balance ?? (grossRaised - totalWithdrawn);
+  
+  const raisedAmount = grossRaised; // Gross amount for progress and display
   const targetAmount = collection.amount || 0;
   const progressPercentage = targetAmount > 0 ? Math.min(100, Math.round((raisedAmount / targetAmount) * 100)) : 0;
   const isLimited = collection.max_contributions !== null;
   const contributorCount = contributors.filter(c => c.status === 'success' || c.status === 'paid').length;
   const displayContributorCount = collection.total_contributions > contributorCount ? collection.total_contributions : contributorCount;
 
-  // Financial Stats from Wallet
-  const availableBalance = wallet?.available_balance || 0;
-  const ledgerBalance = wallet?.ledger_balance || 0;
-  const pendingBalance = ledgerBalance - availableBalance;
+  // Financial Stats with 5 AM Settlement Rule
+  // Rule: Payments become available the next day at 5 AM
+  const now = new Date();
+  const today5am = new Date(now);
+  today5am.setHours(5, 0, 0, 0);
+  
+  // Cutoff is the start of the day after which payments are not yet settled
+  // If before 5 AM, only payments from day-before-yesterday and older are available
+  // If after 5 AM, payments from yesterday and older are available
+  const cutoffDate = now < today5am 
+    ? new Date(new Date(now).setHours(0, 0, 0, 0) - 24 * 60 * 60 * 1000) 
+    : new Date(new Date(now).setHours(0, 0, 0, 0));
+
+  const settledRaised = contributors
+    .filter(c => (c.status === 'success' || c.status === 'paid') && new Date(c.created_at) < cutoffDate)
+    .reduce((sum, c) => sum + c.amount, 0);
+
+  const availableForWithdrawal = Math.max(0, settledRaised - totalWithdrawn);
+  
+  const availableBalance = availableForWithdrawal;
+  const ledgerBalance = totalBalance;
+  const pendingBalance = Math.max(0, ledgerBalance - availableBalance);
 
   // Type determination
   const typeLower = (collection.type || '').toLowerCase();
@@ -484,6 +508,10 @@ const CollectionDetailPage = () => {
                   <span className="text-muted-foreground">Total Raised</span>
                   <span className="font-bold text-lg">{formatCurrency(raisedAmount)}</span>
                 </div>
+                <div className="flex justify-between text-sm mb-2 border-b pb-2">
+                  <span className="text-muted-foreground">Total Balance</span>
+                  <span className="font-bold text-lg text-primary">{formatCurrency(totalBalance)}</span>
+                </div>
                 {isFundraiser && targetAmount > 0 && (
                   <>
                     <Progress value={progressPercentage} className="h-2 mb-1" />
@@ -494,7 +522,7 @@ const CollectionDetailPage = () => {
 
               <div className="pt-4 border-t space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Available</span>
+                  <span className="text-sm text-muted-foreground">Available for Withdrawal</span>
                   <span className="font-medium text-green-600">{formatCurrency(availableBalance)}</span>
                 </div>
                 <div className="flex justify-between items-center">

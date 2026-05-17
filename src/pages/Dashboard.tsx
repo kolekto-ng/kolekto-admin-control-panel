@@ -97,7 +97,7 @@ const Dashboard = () => {
               variant="warning"
               notification={stats.pendingWithdrawals > 0}
             />
-            <StatsCard
+             <StatsCard
               title="Flagged Transactions"
               value={stats.flaggedTransactions.toString()}
               description="Requires attention"
@@ -106,6 +106,28 @@ const Dashboard = () => {
               trendValue="5%"
               variant="danger"
               notification={stats.flaggedTransactions > 0}
+            />
+
+            <StatsCard
+              title="Total Available Balance"
+              value={formatCurrency(stats.totalLedgerBalance)}
+              description="Platform-wide ledger balance"
+              icon="wallet"
+              variant="default"
+            />
+            <StatsCard
+              title="Total Available for Withdrawal"
+              value={formatCurrency(stats.totalAvailableBalance)}
+              description="Settled and ready to withdraw"
+              icon="check"
+              variant="success"
+            />
+            <StatsCard
+              title="Total Pending for Withdrawal"
+              value={formatCurrency(stats.totalPendingBalance)}
+              description="Funds in T+1 settlement"
+              icon="clock"
+              variant="warning"
             />
           </>
         ) : (

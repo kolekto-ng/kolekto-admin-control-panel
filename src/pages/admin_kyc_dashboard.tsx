@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -63,7 +65,7 @@ const AdminKYCDashboard = () => {
   const API_BASE_URL =
     import.meta.env.MODE === "production"
       ? import.meta.env.VITE_API_URL || "https://api.kolekto.com.ng/api"
-      : import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
+      : import.meta.env.VITE_API_BASE_URL || "http://localhost:5050/api";
 
   useEffect(() => {
     fetchKYCVerifications();
@@ -188,7 +190,7 @@ const AdminKYCDashboard = () => {
       console.log('Action response:', response.data);
 
       if (response.data.message) {
-        alert(`KYC ${action.replace('_', ' ')} successful!`);
+        toast.success(`KYC ${action.replace('_', ' ')} successful!`);
 
         // Refresh user details
         await fetchUserDetails(selectedUser.id);
@@ -200,11 +202,11 @@ const AdminKYCDashboard = () => {
         setAdminNotes('');
         setShowDocumentModal(false);
       } else {
-        alert(response.data.error || 'Action failed');
+        toast.error(response.data.error || 'Action failed');
       }
     } catch (error) {
       console.error('Error performing action:', error);
-      alert(error.response?.data?.error || error.response?.data?.message || 'Failed to perform action. Please try again.');
+      toast.error(error.response?.data?.error || error.response?.data?.message || 'Failed to perform action. Please try again.');
     } finally {
       setActionLoading(false);
     }
@@ -441,7 +443,8 @@ const AdminKYCDashboard = () => {
                     <div>
                       <p className="font-medium">{doc.type}</p>
                       <p className="text-sm text-muted-foreground">
-                        {new Date(doc.uploadedAt).toLocaleDateString()} • {(doc.fileSize / (1024 * 1024)).toFixed(2)} MB
+                        {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'} • {doc.files?.length || 0} file(s)
+                        {doc.files && doc.files.length > 0 && ` • ${(doc.files.reduce((acc, f) => acc + f.fileSize, 0) / (1024 * 1024)).toFixed(2)} MB`}
                       </p>
                     </div>
                   </div>
@@ -477,8 +480,6 @@ const AdminKYCDashboard = () => {
 
             </CardContent>
           </Card>
-
-          {/* Address Documents */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -497,7 +498,8 @@ const AdminKYCDashboard = () => {
                     <div>
                       <p className="font-medium">{doc.type}</p>
                       <p className="text-sm text-muted-foreground">
-                        {new Date(doc.uploadedAt).toLocaleDateString()} • {(doc.fileSize / (1024 * 1024)).toFixed(2)} MB
+                        {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'N/A'} • {doc.files?.length || 0} file(s)
+                        {doc.files && doc.files.length > 0 && ` • ${(doc.files.reduce((acc, f) => acc + f.fileSize, 0) / (1024 * 1024)).toFixed(2)} MB`}
                       </p>
                     </div>
                   </div>
@@ -530,9 +532,10 @@ const AdminKYCDashboard = () => {
                   </div>
                 </div>
               ))}
-
             </CardContent>
           </Card>
+
+
         </div>
 
         {/* Right Column - Sidebar Info */}
@@ -574,27 +577,55 @@ const AdminKYCDashboard = () => {
 
           {selectedDocument && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                <div>
-                  <p className="font-medium">{selectedDocument.fileName}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Uploaded: {new Date(selectedDocument.uploadedAt).toLocaleString()} •
-                    Size: {(selectedDocument.fileSize / (1024 * 1024)).toFixed(2)} MB
-                  </p>
-                </div>
-                <Button variant="outline" onClick={() => window.open(selectedDocument.fileUrl, '_blank')}>
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Open Full Size
-                </Button>
-              </div>
+              {selectedDocument.files && selectedDocument.files.length > 0 ? (
+                <Tabs defaultValue="file-0" className="w-full">
+                  <TabsList className="mb-4">
+                    {selectedDocument.files.map((file, index) => (
+                      <TabsTrigger key={`trigger-${index}`} value={`file-${index}`}>
+                        {file.fileName?.toLowerCase().includes('selfie') ? 'Selfie' : 'ID Document'}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  
+                  {selectedDocument.files.map((file, index) => (
+                    <TabsContent key={`content-${index}`} value={`file-${index}`} className="space-y-4 mt-0">
+                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
+                        <div>
+                          <p className="font-medium">{file.fileName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Uploaded: {new Date(file.uploadedAt).toLocaleString()} •
+                            Size: {(file.fileSize / (1024 * 1024)).toFixed(2)} MB
+                          </p>
+                        </div>
+                        <Button variant="outline" onClick={() => window.open(file.fileUrl, '_blank')}>
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          Open Full Size
+                        </Button>
+                      </div>
 
-              <div className="border rounded-lg p-4">
-                <img
-                  src={selectedDocument.fileUrl}
-                  alt={selectedDocument.type}
-                  className="w-full max-h-96 object-contain rounded"
-                />
-              </div>
+                      <div className="border rounded-lg p-4 bg-white min-h-[300px] flex items-center justify-center">
+                        {file.fileType?.includes('pdf') || file.fileName?.toLowerCase().endsWith('.pdf') ? (
+                          <iframe
+                            src={`${file.fileUrl}#toolbar=0`}
+                            className="w-full h-[500px] rounded border-0"
+                            title="PDF Document Preview"
+                          />
+                        ) : (
+                          <img
+                            src={file.fileUrl}
+                            alt={selectedDocument.type}
+                            className="w-full max-h-96 object-contain rounded"
+                          />
+                        )}
+                      </div>
+                    </TabsContent>
+                  ))}
+                </Tabs>
+              ) : (
+                <div className="p-4 border rounded-lg bg-gray-50 text-center text-muted-foreground">
+                  No files found for this document.
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>Verification Notes</Label>
@@ -615,7 +646,12 @@ const AdminKYCDashboard = () => {
             </Button>
             <Button
               variant="destructive"
-              onClick={() => handleVerificationAction({ action: 'reject_document', documentType: selectedDocument?.type, documentId: selectedDocument?.id, verificationType: 'identity' })}
+              onClick={() => handleVerificationAction({ 
+                action: 'reject_document', 
+                documentType: selectedDocument?.type, 
+                documentId: selectedDocument?.id, 
+                verificationType: selectedDocument?.documentType 
+              })}
               disabled={actionLoading}
             >
               <X className="h-4 w-4 mr-2" />
@@ -623,7 +659,12 @@ const AdminKYCDashboard = () => {
             </Button>
             <Button
               className="bg-green-600 hover:bg-green-700"
-              onClick={() => handleVerificationAction({ action: 'approve_document', documentType: selectedDocument?.type, documentId: selectedDocument?.id, verificationType: 'identity' })}
+              onClick={() => handleVerificationAction({ 
+                action: 'approve_document', 
+                documentType: selectedDocument?.type, 
+                documentId: selectedDocument?.id, 
+                verificationType: selectedDocument?.documentType 
+              })}
               disabled={actionLoading}
             >
               <Check className="h-4 w-4 mr-2" />

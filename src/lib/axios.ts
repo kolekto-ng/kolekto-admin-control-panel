@@ -1,6 +1,6 @@
 import axios from "axios";
 
-let baseURL = "http://localhost:5000/api";
+let baseURL = "http://localhost:5050/api";
 if (import.meta.env.MODE === "production") {
   baseURL = import.meta.env.VITE_API_URL;
   console.log("Running in production");
@@ -20,6 +20,7 @@ export const axiosInstance = axios.create({
 axiosInstance.interceptors.request.use(
   (config) => {
     let token = localStorage.getItem("kolekto-auth-token");
+    console.log(token)
     if (token) {
       try {
         token = JSON.parse(token);

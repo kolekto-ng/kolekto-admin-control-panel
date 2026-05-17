@@ -9,6 +9,9 @@ export interface DashboardStats {
   approvedWithdrawals: number;
   pendingWithdrawals: number;
   flaggedTransactions: number;
+  totalAvailableBalance: number;
+  totalPendingBalance: number;
+  totalLedgerBalance: number;
 }
 
 export interface Transaction {
@@ -49,12 +52,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         { count: pendingWithdrawals },
         { data: recentContributions },
         { data: recentWithdrawals },
+        { data: walletsData },
       ] = await Promise.all([
         supabase.from("profiles").select("*", { count: "exact", head: true }),
         supabase
           .from("collections")
-          .select("*", { count: "exact", head: true })
-          .lt("deadline", new Date().toISOString()),
+          .select("*", { count: "exact", head: true }),
         supabase.from("contributions").select("amount").eq("status", "paid"),
         supabase.from("withdrawals").select("amount, status"),
         supabase
@@ -82,9 +85,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           )
           .order("created_at", { ascending: false }),
         // .limit(5),
+        supabase.from("wallets").select("available_balance, ledger_balance"),
       ]);
 
-      console.log(totalCollections, "totalCollections");
+      console.log(totalCollections, "totalCollections")
+      const { data: collections } = await supabase.from("collections").select("*")
+      console.log(collections)
 
       // Calculate totals
       const totalContributions =
@@ -101,6 +107,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           ?.filter((w) => w.status === "success")
           ?.reduce((sum, withdrawal) => sum + withdrawal.amount, 0) || 0;
 
+      const totalAvailableBalance = walletsData?.reduce((sum, w) => sum + (w.available_balance || 0), 0) || 0;
+      const totalLedgerBalance = walletsData?.reduce((sum, w) => sum + (w.ledger_balance || 0), 0) || 0;
+      const totalPendingBalance = Math.max(0, totalLedgerBalance - totalAvailableBalance);
+
       const stats: DashboardStats = {
         totalUsers: totalUsers || 0,
         totalCollections: totalCollections || 0,
@@ -109,6 +119,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         approvedWithdrawals,
         pendingWithdrawals: pendingWithdrawals || 0,
         flaggedTransactions: 0, // This would need additional logic to determine flagged transactions
+        totalAvailableBalance,
+        totalPendingBalance,
+        totalLedgerBalance,
       };
 
       // Create transactions array from contributions and withdrawals
