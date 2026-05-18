@@ -79,6 +79,7 @@ const KYCDetailPage = () => {
   const [feedbackNote, setFeedbackNote] = useState('');
   const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [viewingDoc, setViewingDoc] = useState<KYCDocument | null>(null);
+  const [activeTab, setActiveTab] = useState<'selfie' | 'document' | 'side-by-side'>('selfie');
   const [showNINRejectDialog, setShowNINRejectDialog] = useState(false);
   const [ninRejectReason, setNINRejectReason] = useState('');
 
@@ -168,6 +169,11 @@ const KYCDetailPage = () => {
 
   const openDocumentViewer = (doc: KYCDocument) => {
     setViewingDoc(doc);
+    if (doc.document_type === 'identity') {
+      setActiveTab('selfie');
+    } else {
+      setActiveTab('document');
+    }
     setShowDocumentModal(true);
   };
 
@@ -620,52 +626,149 @@ const KYCDetailPage = () => {
               Review the uploaded document. You can view it at full size or download it.
             </DialogDescription>
           </DialogHeader>
-          {viewingDoc && viewingDoc.files.length > 0 && (
-            <div className="space-y-4">
-              {viewingDoc.files.map((file) => (
-                <div key={file.id} className="space-y-3">
-                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                    <div>
-                      <p className="font-medium text-sm">{file.file_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {file.uploaded_at ? formatDateTime(file.uploaded_at) : ''} •{' '}
-                        {file.file_size ? `${(file.file_size / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size'}
-                      </p>
-                    </div>
-                    {file.signed_url && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => window.open(file.signed_url, '_blank')}
-                      >
-                        <ExternalLink className="h-4 w-4 mr-1.5" />
-                        Open Full Size
-                      </Button>
-                    )}
+          {(() => {
+            if (!viewingDoc) return null;
+
+            const isIdentity = viewingDoc.document_type === 'identity';
+            const selfieFiles = viewingDoc.files.filter(f => f.file_name.toLowerCase().includes('selfie'));
+            const documentFiles = viewingDoc.files.filter(f => !f.file_name.toLowerCase().includes('selfie'));
+            const hasSelfieAndDoc = selfieFiles.length > 0 && documentFiles.length > 0;
+
+            const renderFileItem = (file: KYCFile) => (
+              <div key={file.id} className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-gray-100 shadow-sm">
+                  <div className="min-w-0 flex-1 mr-4">
+                    <p className="font-medium text-sm truncate" title={file.file_name}>{file.file_name}</p>
+                    <p className="text-xs text-muted-foreground font-mono">
+                      {file.uploaded_at ? formatDateTime(file.uploaded_at) : ''} •{' '}
+                      {file.file_size ? `${(file.file_size / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size'}
+                    </p>
                   </div>
                   {file.signed_url && (
-                    <div className="border rounded-lg p-2">
-                      <img
-                        src={file.signed_url}
-                        alt={file.file_name}
-                        className="w-full max-h-96 object-contain rounded"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
-                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => window.open(file.signed_url, '_blank')}
+                      className="flex-shrink-0"
+                    >
+                      <ExternalLink className="h-4 w-4 mr-1.5" />
+                      Open Full Size
+                    </Button>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-          {viewingDoc && viewingDoc.files.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <FileText className="h-10 w-10 text-gray-200 mx-auto mb-3" />
-              <p>No files attached to this document</p>
-            </div>
-          )}
-          <DialogFooter className="gap-2">
+                {file.signed_url && (
+                  <div className="border rounded-lg p-2 bg-gray-50/50 flex justify-center items-center">
+                    <img
+                      src={file.signed_url}
+                      alt={file.file_name}
+                      className="w-full max-h-[50vh] object-contain rounded shadow-sm hover:scale-[1.01] transition-transform duration-200"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+
+            if (viewingDoc.files.length === 0) {
+              return (
+                <div className="text-center py-8 text-muted-foreground">
+                  <FileText className="h-10 w-10 text-gray-200 mx-auto mb-3" />
+                  <p>No files attached to this document</p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                {isIdentity && hasSelfieAndDoc && (
+                  <div className="flex border-b border-gray-200 bg-gray-50/50 p-1 rounded-lg sticky top-0 z-10 backdrop-blur-sm shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('selfie')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-200 flex items-center justify-center gap-2 ${
+                        activeTab === 'selfie'
+                          ? 'bg-white text-indigo-600 shadow-sm border border-gray-200/50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50'
+                      }`}
+                    >
+                      <User className="h-4 w-4" />
+                      Selfie Upload
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('document')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-200 flex items-center justify-center gap-2 ${
+                        activeTab === 'document'
+                          ? 'bg-white text-indigo-600 shadow-sm border border-gray-200/50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50'
+                      }`}
+                    >
+                      <FileText className="h-4 w-4" />
+                      ID Document
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('side-by-side')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-200 flex items-center justify-center gap-2 ${
+                        activeTab === 'side-by-side'
+                          ? 'bg-white text-indigo-600 shadow-sm border border-gray-200/50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50'
+                      }`}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Side-by-Side View
+                    </button>
+                  </div>
+                )}
+
+                {isIdentity && hasSelfieAndDoc ? (
+                  <>
+                    {activeTab === 'selfie' && (
+                      <div className="space-y-4">
+                        {selfieFiles.map(renderFileItem)}
+                      </div>
+                    )}
+
+                    {activeTab === 'document' && (
+                      <div className="space-y-4">
+                        {documentFiles.map(renderFileItem)}
+                      </div>
+                    )}
+
+                    {activeTab === 'side-by-side' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 p-2 bg-indigo-50/50 border border-indigo-100 rounded-lg text-indigo-700 text-sm font-semibold sticky top-0 z-10 backdrop-blur-sm">
+                            <User className="h-4 w-4" />
+                            Selfie Photo
+                          </div>
+                          <div className="space-y-4">
+                            {selfieFiles.map(renderFileItem)}
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 p-2 bg-emerald-50/50 border border-emerald-100 rounded-lg text-emerald-700 text-sm font-semibold sticky top-0 z-10 backdrop-blur-sm">
+                            <FileText className="h-4 w-4" />
+                            Government-Issued ID
+                          </div>
+                          <div className="space-y-4">
+                            {documentFiles.map(renderFileItem)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-4">
+                    {viewingDoc.files.map(renderFileItem)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter className="gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setShowDocumentModal(false)}>
               Close
             </Button>
