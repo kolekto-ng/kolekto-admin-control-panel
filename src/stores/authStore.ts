@@ -4,39 +4,32 @@ import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADMIN EMAIL ALLOWLIST
+// ADMIN ACCESS — DB-backed (public.admin_users)
 // ─────────────────────────────────────────────────────────────────────────────
-// The admin panel must reject ANY login attempt from an email that is not in
-// this list. Without this gate, a regular user account could log in to the
-// admin panel via Supabase and bypass UI-level controls — even if the
-// backend's `requireAdmin` middleware would block their API calls, the admin
-// panel writes to several tables (kyc_documents, kyc_verifications,
-// withdrawals) directly via the Supabase client. Those direct writes are
-// only protected by the user's Supabase JWT, NOT by `requireAdmin`.
+// Admin membership is determined by the `admin_users` table in Supabase.
+// We call the SECURITY DEFINER RPC `current_admin_user()` which returns the
+// caller's admin row (or no rows). The RPC respects auth.jwt() so it cannot
+// be spoofed from the client.
 //
-// Sources, in priority order:
-//   1. VITE_ADMIN_EMAILS env (comma-separated) — set in admin .env for prod
-//   2. Hardcoded default — used in dev/local before env is set
+// This replaces the previous hardcoded HARDCODED_ADMIN_EMAILS allowlist and
+// the VITE_ADMIN_EMAILS env fallback. The migration that creates this table
+// lives at kolekto-be-old/database/admin_users.sql.
 //
-// IMPORTANT: This is layer-1 defense. The full fix is RLS policies on
-// kyc_documents / kyc_verifications / withdrawals that deny writes from
-// non-admin JWTs. Until that's deployed, this client-side gate + the
-// backend's `requireAdmin` middleware are the two enforcement layers.
-const HARDCODED_ADMIN_EMAILS = ["gazalianfellow@gmail.com"];
-
-function getAllowedAdminEmails(): string[] {
-  const fromEnv = (import.meta.env.VITE_ADMIN_EMAILS as string | undefined) || "";
-  const fromEnvList = fromEnv
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  if (fromEnvList.length > 0) return fromEnvList;
-  return HARDCODED_ADMIN_EMAILS.map((e) => e.toLowerCase());
-}
-
-function isAdminEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return getAllowedAdminEmails().includes(email.toLowerCase());
+// Defense-in-depth: this client-side gate is layer 1. The backend's
+// `requireAdmin` middleware (now also DB-backed) is layer 2. RLS policies on
+// admin-only tables are layer 3.
+async function isAuthenticatedUserAdmin(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc("current_admin_user");
+    if (error) {
+      console.error("[authStore] admin lookup failed:", error.message);
+      return false;
+    }
+    return Array.isArray(data) ? data.length > 0 : Boolean(data);
+  } catch (err) {
+    console.error("[authStore] admin lookup threw:", err);
+    return false;
+  }
 }
 
 interface AuthState {
@@ -71,13 +64,14 @@ export const useAuthStore = create<AuthState>()(
             return { error };
           }
 
-          // ADMIN EMAIL ALLOWLIST GATE.
+          // ADMIN GATE (DB-backed via public.admin_users).
           // The Supabase login itself just verifies email+password — it does
-          // not know about admin vs. user. We immediately sign out any
-          // account that authenticates with a non-allowlisted email so they
-          // never get a valid admin session in localStorage.
-          const signedInEmail = data.user?.email || "";
-          if (!isAdminEmail(signedInEmail)) {
+          // not know about admin vs. user. We check membership against the
+          // admin_users table and immediately sign out any account that is
+          // not listed, so non-admins never get a valid admin session in
+          // localStorage.
+          const isAdmin = await isAuthenticatedUserAdmin();
+          if (!isAdmin) {
             // Best-effort sign-out so no session lingers in localStorage.
             try {
               await supabase.auth.signOut();
@@ -128,23 +122,25 @@ export const useAuthStore = create<AuthState>()(
         } = await supabase.auth.getSession();
 
         // SAFETY NET: if a non-admin session is somehow restored from
-        // localStorage (e.g. existing session predates this allowlist gate),
-        // sign them out immediately on app start. This blocks the previously-
-        // signed-in non-admin account that's currently sitting in your
-        // browser from staying logged in.
-        if (session?.user?.email && !isAdminEmail(session.user.email)) {
-          try {
-            await supabase.auth.signOut();
-          } catch {
-            /* ignore */
+        // localStorage (e.g. the user was demoted, or a forged token), sign
+        // them out immediately on app start. The DB membership check is the
+        // single source of truth.
+        if (session?.user) {
+          const isAdmin = await isAuthenticatedUserAdmin();
+          if (!isAdmin) {
+            try {
+              await supabase.auth.signOut();
+            } catch {
+              /* ignore */
+            }
+            set({
+              user: null,
+              session: null,
+              loading: false,
+              initialized: true,
+            });
+            return;
           }
-          set({
-            user: null,
-            session: null,
-            loading: false,
-            initialized: true,
-          });
-          return;
         }
 
         set({
@@ -154,13 +150,16 @@ export const useAuthStore = create<AuthState>()(
           initialized: true,
         });
 
-        // Listen for auth changes — also enforce the allowlist here so a
-        // forged session restore (e.g. from another tab) can't bypass it.
-        supabase.auth.onAuthStateChange((_event, newSession) => {
-          if (newSession?.user?.email && !isAdminEmail(newSession.user.email)) {
-            void supabase.auth.signOut();
-            set({ user: null, session: null });
-            return;
+        // Listen for auth changes — re-check DB membership on every session
+        // change so a token rotation cannot smuggle in a demoted user.
+        supabase.auth.onAuthStateChange(async (_event, newSession) => {
+          if (newSession?.user) {
+            const stillAdmin = await isAuthenticatedUserAdmin();
+            if (!stillAdmin) {
+              void supabase.auth.signOut();
+              set({ user: null, session: null });
+              return;
+            }
           }
           set({
             user: newSession?.user ?? null,
