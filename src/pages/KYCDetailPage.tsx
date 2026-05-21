@@ -63,6 +63,7 @@ const KYCDetailPage = () => {
     detailLoading,
     error,
     fetchKYCDetail,
+    getSignedUrl,
     approveDocument,
     rejectDocument,
     approveNIN,
@@ -70,7 +71,6 @@ const KYCDetailPage = () => {
     addFeedback,
   } = useKYCStore();
   const { toast } = useToast();
-
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -82,6 +82,9 @@ const KYCDetailPage = () => {
   const [activeTab, setActiveTab] = useState<'selfie' | 'document' | 'side-by-side'>('selfie');
   const [showNINRejectDialog, setShowNINRejectDialog] = useState(false);
   const [ninRejectReason, setNINRejectReason] = useState('');
+  // Lazy signed URLs: fetched only when a document is opened for viewing
+  const [fileUrlsLoading, setFileUrlsLoading] = useState(false);
+  const [urlCache, setUrlCache] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (userId) fetchKYCDetail(userId);
@@ -167,7 +170,7 @@ const KYCDetailPage = () => {
     }
   };
 
-  const openDocumentViewer = (doc: KYCDocument) => {
+  const openDocumentViewer = async (doc: KYCDocument) => {
     setViewingDoc(doc);
     if (doc.document_type === 'identity') {
       setActiveTab('selfie');
@@ -175,6 +178,20 @@ const KYCDetailPage = () => {
       setActiveTab('document');
     }
     setShowDocumentModal(true);
+
+    // Fetch signed URLs only for files that aren't already cached
+    const uncachedFiles = doc.files.filter((f) => !urlCache[f.file_path]);
+    if (uncachedFiles.length === 0) return;
+
+    setFileUrlsLoading(true);
+    const entries = await Promise.all(
+      uncachedFiles.map(async (f) => {
+        const url = await getSignedUrl(f.file_path);
+        return [f.file_path, url] as [string, string];
+      })
+    );
+    setUrlCache((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    setFileUrlsLoading(false);
   };
 
   const getStatusBadge = (status: string | null) => {
@@ -634,48 +651,60 @@ const KYCDetailPage = () => {
             const documentFiles = viewingDoc.files.filter(f => !f.file_name.toLowerCase().includes('selfie'));
             const hasSelfieAndDoc = selfieFiles.length > 0 && documentFiles.length > 0;
 
-            const renderFileItem = (file: KYCFile) => (
-              <div key={file.id} className="space-y-3">
-                <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-gray-100 shadow-sm">
-                  <div className="min-w-0 flex-1 mr-4">
-                    <p className="font-medium text-sm truncate" title={file.file_name}>{file.file_name}</p>
-                    <p className="text-xs text-muted-foreground font-mono">
-                      {file.uploaded_at ? formatDateTime(file.uploaded_at) : ''} •{' '}
-                      {file.file_size ? `${(file.file_size / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size'}
-                    </p>
+            const renderFileItem = (file: KYCFile) => {
+              const signedUrl = urlCache[file.file_path];
+              return (
+                <div key={file.id} className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-gray-100 shadow-sm">
+                    <div className="min-w-0 flex-1 mr-4">
+                      <p className="font-medium text-sm truncate" title={file.file_name}>{file.file_name}</p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        {file.uploaded_at ? formatDateTime(file.uploaded_at) : ''} •{' '}
+                        {file.file_size ? `${(file.file_size / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size'}
+                      </p>
+                    </div>
+                    {signedUrl && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(signedUrl, '_blank')}
+                        className="flex-shrink-0"
+                      >
+                        <ExternalLink className="h-4 w-4 mr-1.5" />
+                        Open Full Size
+                      </Button>
+                    )}
                   </div>
-                  {file.signed_url && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(file.signed_url, '_blank')}
-                      className="flex-shrink-0"
-                    >
-                      <ExternalLink className="h-4 w-4 mr-1.5" />
-                      Open Full Size
-                    </Button>
+                  {signedUrl && (
+                    <div className="border rounded-lg p-2 bg-gray-50/50 flex justify-center items-center">
+                      <img
+                        src={signedUrl}
+                        alt={file.file_name}
+                        className="w-full max-h-[50vh] object-contain rounded shadow-sm hover:scale-[1.01] transition-transform duration-200"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
-                {file.signed_url && (
-                  <div className="border rounded-lg p-2 bg-gray-50/50 flex justify-center items-center">
-                    <img
-                      src={file.signed_url}
-                      alt={file.file_name}
-                      className="w-full max-h-[50vh] object-contain rounded shadow-sm hover:scale-[1.01] transition-transform duration-200"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            );
+              );
+            };
 
             if (viewingDoc.files.length === 0) {
               return (
                 <div className="text-center py-8 text-muted-foreground">
                   <FileText className="h-10 w-10 text-gray-200 mx-auto mb-3" />
                   <p>No files attached to this document</p>
+                </div>
+              );
+            }
+
+            if (fileUrlsLoading) {
+              return (
+                <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+                  <Loader2 className="h-7 w-7 animate-spin text-indigo-500" />
+                  <p className="text-sm">Loading document files...</p>
                 </div>
               );
             }

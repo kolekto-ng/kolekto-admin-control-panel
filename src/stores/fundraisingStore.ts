@@ -1,4 +1,4 @@
-﻿import { create } from "zustand";
+import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
 
 export type CampaignStatus =
@@ -102,17 +102,115 @@ export const useFundraisingStore = create<FundraisingState>((set) => ({
   fetchCampaigns: async () => {
     set({ loading: true, error: null });
     try {
-      // Call the edge function that uses service role to bypass RLS
-      const response = await supabase.functions.invoke('get-all-fundraising-campaigns');
+      const { data: campaignsData, error: campaignsError } = await supabase
+        .from("campaigns")
+        .select(`
+          id,
+          title,
+          city,
+          country,
+          creator_id,
+          category,
+          target_amount,
+          status,
+          created_at,
+          verification_documents(id),
+          campaign_donations(amount, status)
+        `)
+        .order("created_at", { ascending: false });
 
-      if (response.error) throw response.error;
+      if (campaignsError) throw campaignsError;
 
-      const { data, stats } = response.data as {
-        data: Campaign[],
-        stats: FundraisingStats
+      const items = campaignsData || [];
+      const creatorIds = [...new Set(items.map((c) => c.creator_id).filter(Boolean))];
+
+      let profilesMap: Record<string, { full_name: string | null; email: string | null }> = {};
+      if (creatorIds.length > 0) {
+        const { data: profilesData, error: profilesError } = await supabase
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", creatorIds);
+
+        if (profilesError) throw profilesError;
+
+        (profilesData || []).forEach((p) => {
+          profilesMap[p.id] = p;
+        });
+      }
+
+      const normalizeStatus = (status: string | null): CampaignStatus => {
+        if (!status) return "draft";
+        const s = status.toLowerCase().replace(/\s+/g, "_");
+        if (s === "pending_review") return "pending_verification";
+        return s as CampaignStatus;
       };
 
-      set({ campaigns: data || [], stats: stats || { total: 0, pending_verification: 0, active: 0, paused: 0, rejected: 0, closed: 0 }, loading: false });
+      const mappedCampaigns: Campaign[] = items.map((camp: any) => {
+        const profile = profilesMap[camp.creator_id];
+        const donations = camp.campaign_donations || [];
+        const totalRaised = donations
+          .filter((d: any) => d.status === "success" || d.status === "paid")
+          .reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
+
+        const status = normalizeStatus(camp.status);
+
+        return {
+          id: camp.id,
+          creator_id: camp.creator_id,
+          creator_name: profile?.full_name || profile?.email || "Unknown",
+          creator_email: profile?.email || "",
+          creator_kyc_status: "unverified",
+          title: camp.title || "",
+          summary: null,
+          main_image_url: null,
+          target_amount: camp.target_amount ? Number(camp.target_amount) : null,
+          min_contribution: null,
+          currency: "NGN",
+          is_open_ended: null,
+          deadline: null,
+          story_for: null,
+          story_why: null,
+          story_achieve: null,
+          story: null,
+          phone_number: null,
+          country_code: "NG +234",
+          country: camp.country || "Nigeria",
+          city: camp.city || null,
+          category: camp.category || null,
+          keywords: null,
+          social_twitter: null,
+          social_instagram: null,
+          social_facebook: null,
+          social_links: [],
+          status,
+          created_at: camp.created_at,
+          updated_at: null,
+          verified_at: null,
+          campaign_summary: null,
+          campaign_category: camp.category || null,
+          campaign_keywords: null,
+          campaign_country: camp.country || null,
+          story_images: [],
+          banner_url: null,
+          support_phone_number: null,
+          verification_documents: camp.verification_documents || [],
+          campaign_images: [],
+          campaign_donations: [],
+          total_raised: totalRaised,
+          contributions_count: 0,
+        };
+      });
+
+      const stats: FundraisingStats = {
+        total: mappedCampaigns.length,
+        pending_verification: mappedCampaigns.filter((c) => c.status === "pending_verification" || c.status === "pending").length,
+        active: mappedCampaigns.filter((c) => c.status === "active").length,
+        paused: mappedCampaigns.filter((c) => c.status === "paused").length,
+        rejected: mappedCampaigns.filter((c) => c.status === "rejected").length,
+        closed: mappedCampaigns.filter((c) => c.status === "closed" || c.status === "completed").length,
+      };
+
+      set({ campaigns: mappedCampaigns, stats, loading: false });
     } catch (err: any) {
       console.error("Error fetching campaigns:", err);
       set({ error: "Failed to load fundraising campaigns", loading: false });
@@ -122,16 +220,99 @@ export const useFundraisingStore = create<FundraisingState>((set) => ({
   fetchCampaignById: async (id: string) => {
     set({ detailLoading: true, error: null });
     try {
-      // Use edge function (service role) to bypass RLS for cross-user access
-      const response = await supabase.functions.invoke(
-        'get-fundraising-campaign-by-id',
-        { body: { id } }
-      );
+      const { data: camp, error: campaignError } = await supabase
+        .from("campaigns")
+        .select("*")
+        .eq("id", id)
+        .single();
 
-      if (response.error) throw response.error;
+      if (campaignError) throw campaignError;
+      if (!camp) throw new Error("Campaign not found");
 
-      const { data } = response.data as { data: Campaign };
-      set({ selectedCampaign: data, detailLoading: false });
+      const [profileRes, docsRes, imgRes, donRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, full_name, email, kyc_verifications(status)")
+          .eq("id", camp.creator_id)
+          .maybeSingle(),
+        supabase.from("verification_documents").select("*").eq("campaign_id", id),
+        supabase.from("campaign_images").select("*").eq("campaign_id", id),
+        supabase.from("campaign_donations").select("*").eq("campaign_id", id),
+      ]);
+
+      const profile = profileRes?.data;
+      const kycStatus = profile?.kyc_verifications
+        ? (Array.isArray(profile.kyc_verifications)
+            ? profile.kyc_verifications[0]?.status
+            : (profile.kyc_verifications as any)?.status)
+        : null;
+
+      const donations = donRes?.data || [];
+      const totalRaised = donations
+        .filter((d: any) => d.status === "success" || d.status === "paid")
+        .reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
+
+      const socialLinks: SocialLink[] = [];
+      if (camp.social_twitter) socialLinks.push({ platform: "twitter", url: camp.social_twitter });
+      if (camp.social_instagram) socialLinks.push({ platform: "instagram", url: camp.social_instagram });
+      if (camp.social_facebook) socialLinks.push({ platform: "facebook", url: camp.social_facebook });
+
+      const storyImages = camp.main_image_url ? [camp.main_image_url] : [];
+
+      const normalizeStatus = (status: string | null): CampaignStatus => {
+        if (!status) return "draft";
+        const s = status.toLowerCase().replace(/\s+/g, "_");
+        if (s === "pending_review") return "pending_verification";
+        return s as CampaignStatus;
+      };
+
+      const mappedCampaign: Campaign = {
+        id: camp.id,
+        creator_id: camp.creator_id,
+        creator_name: profile?.full_name || profile?.email || "Unknown",
+        creator_email: profile?.email || "",
+        creator_kyc_status: kycStatus || "unverified",
+        title: camp.title || "",
+        summary: camp.summary || null,
+        main_image_url: camp.main_image_url || null,
+        target_amount: camp.target_amount ? Number(camp.target_amount) : null,
+        min_contribution: camp.min_contribution ? Number(camp.min_contribution) : null,
+        currency: camp.currency || "NGN",
+        is_open_ended: camp.is_open_ended || false,
+        deadline: camp.deadline || null,
+        story_for: camp.story_for || null,
+        story_why: camp.story_why || null,
+        story_achieve: camp.story_achieve || null,
+        story: null,
+        phone_number: camp.phone_number || null,
+        country_code: camp.country_code || "NG +234",
+        country: camp.country || "Nigeria",
+        city: camp.city || null,
+        category: camp.category || null,
+        keywords: camp.keywords || null,
+        social_twitter: camp.social_twitter || null,
+        social_instagram: camp.social_instagram || null,
+        social_facebook: camp.social_facebook || null,
+        social_links: socialLinks,
+        status: normalizeStatus(camp.status),
+        created_at: camp.created_at,
+        updated_at: camp.updated_at,
+        verified_at: camp.verified_at || null,
+        campaign_summary: camp.summary || null,
+        campaign_category: camp.category || null,
+        campaign_keywords: camp.keywords ? camp.keywords.join(", ") : null,
+        campaign_country: camp.country || null,
+        story_images: storyImages,
+        banner_url: camp.main_image_url || null,
+        support_phone_number: camp.phone_number || null,
+        verification_documents: docsRes?.data || [],
+        campaign_images: imgRes?.data || [],
+        campaign_donations: donations,
+        total_raised: totalRaised,
+        contributions_count: donations.length,
+      };
+
+      set({ selectedCampaign: mappedCampaign, detailLoading: false });
     } catch (err: any) {
       console.error("Error fetching campaign:", err);
       set({ error: "Failed to load campaign details", detailLoading: false });
