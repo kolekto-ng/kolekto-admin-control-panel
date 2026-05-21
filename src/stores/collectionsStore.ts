@@ -63,58 +63,32 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
     try {
       const { data: collectionsData, error } = await supabase
         .from("collections")
-        .select('*')
+        .select(`
+          id,
+          title,
+          slug,
+          collection_type,
+          type,
+          user_id,
+          target_amount,
+          amount,
+          total_contributions,
+          status,
+          created_at,
+          organizer:user_id(full_name, email),
+          wallets(net_payment, withdrawn, available_balance, pending_balance, ledger_balance)
+        `)
         .order("created_at", { ascending: false });
 
       if (error) {
         throw error;
       }
 
-      // Collect user IDs for batch fetching profiles
-      const userIds = [...new Set(collectionsData?.map((c: any) => c.user_id) || [])];
-
-      let profilesMap: Record<string, any> = {};
-
-      if (userIds.length > 0) {
-        const { data: profilesData } = await supabase
-          .from("profiles")
-          .select("id, full_name, email")
-          .in("id", userIds);
-
-        if (profilesData) {
-          profilesMap = profilesData.reduce((acc: any, profile: any) => {
-            acc[profile.id] = profile;
-            return acc;
-          }, {});
-        }
-      }
-
-      // Fetch wallets for all collections in one query
-      const collectionIds = collectionsData?.map((c: any) => c.id) || [];
-      let walletsMap: Record<string, any> = {};
-
-      if (collectionIds.length > 0) {
-        const { data: walletsData } = await supabase
-          .from("wallets")
-          .select("*")
-          .in("collection_id", collectionIds)
-          .order("updated_at", { ascending: false });
-
-        if (walletsData) {
-          // Keep only the MOST RECENT wallet per collection (legacy data may
-          // contain duplicate wallet rows due to missing UNIQUE constraint).
-          walletsMap = walletsData.reduce((acc: any, wallet: any) => {
-            if (!acc[wallet.collection_id]) {
-              acc[wallet.collection_id] = wallet;
-            }
-            return acc;
-          }, {});
-        }
-      }
-
       const collectionsWithStats = collectionsData?.map((collection: any) => {
-        const wallet = walletsMap[collection.id];
-        const profile = profilesMap[collection.user_id];
+        // Because the foreign key is on the wallets table, Supabase returns an array of wallets.
+        // We take the first one (or null if none exist).
+        const wallet = collection.wallets || null;
+        const profile = collection.organizer;
         const organizerName = profile
           ? (profile.full_name || profile.email || "Unknown User")
           : "Unknown Organizer";

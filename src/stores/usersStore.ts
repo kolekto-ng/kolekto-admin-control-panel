@@ -33,10 +33,19 @@ export const useUsersStore = create<UsersState>((set, get) => ({
     set({ loading: true, error: null });
 
     try {
-      // Fetch profiles
+      // Fetch profiles with nested collections and KYC status (single consolidated query, limited columns)
       const { data: profilesData, error } = await supabase
         .from("profiles")
-        .select("*")
+        .select(`
+          id,
+          full_name,
+          email,
+          phone_number,
+          created_at,
+          date_of_birth,
+          collections(id),
+          kyc_verifications(status)
+        `)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -46,45 +55,35 @@ export const useUsersStore = create<UsersState>((set, get) => ({
         return;
       }
 
-      const userIds = profilesData.map((p) => p.id);
-
-      // Batch fetch KYC verification statuses
-      const { data: kycData } = await supabase
-        .from("kyc_verifications")
-        .select("user_id, status")
-        .in("user_id", userIds);
-
-      const kycMap: Record<string, string> = {};
-      (kycData || []).forEach((k) => {
-        kycMap[k.user_id] = k.status;
-      });
-
-      // Get collection counts per user
-      const { data: collectionsData } = await supabase
-        .from("collections")
-        .select("user_id")
-        .in("user_id", userIds);
-
-      const collectionCountMap: Record<string, number> = {};
-      (collectionsData || []).forEach((c) => {
-        collectionCountMap[c.user_id] = (collectionCountMap[c.user_id] || 0) + 1;
-      });
-
       // Build user list
-      const usersWithStats: User[] = profilesData.map((profile) => {
-        const kycStatus = kycMap[profile.id];
+      const usersWithStats: User[] = (profilesData as any[]).map((profile) => {
+        // Extract KYC status
+        let kycStatus = "unverified";
+        if (profile.kyc_verifications) {
+          if (Array.isArray(profile.kyc_verifications)) {
+            if (profile.kyc_verifications.length > 0) {
+              kycStatus = profile.kyc_verifications[0]?.status || "unverified";
+            }
+          } else {
+            kycStatus = profile.kyc_verifications.status || "unverified";
+          }
+        }
+
         let verificationStatus: VerificationStatus = "unverified";
         if (kycStatus === "verified") verificationStatus = "verified";
         else if (kycStatus === "pending" || kycStatus === "reviewing") verificationStatus = "pending";
         else if (kycStatus === "rejected") verificationStatus = "rejected";
 
+        // Count collections
+        const collectionsCount = Array.isArray(profile.collections) ? profile.collections.length : 0;
+
         return {
           id: profile.id,
           name: profile.full_name || "Unknown User",
-          email: profile.email,
+          email: profile.email || "",
           phone: profile.phone_number || "",
           joinDate: profile.created_at || "",
-          collections: collectionCountMap[profile.id] || 0,
+          collections: collectionsCount,
           totalRaised: 0,
           status: "active" as const,
           verificationStatus,

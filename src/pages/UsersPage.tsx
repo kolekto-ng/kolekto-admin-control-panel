@@ -14,6 +14,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 
 const VERIFICATION_CONFIG: Record<VerificationStatus, { label: string; className: string; icon: typeof CheckCircle }> = {
   verified: {
@@ -43,11 +52,17 @@ const UsersPage = () => {
   const [filteredUsers, setFilteredUsers] = useState(users);
   const [searchTerm, setSearchTerm] = useState('');
   const [verificationFilter, setVerificationFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
   const { toast } = useToast();
 
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, verificationFilter]);
 
   useEffect(() => {
     if (error) {
@@ -99,6 +114,73 @@ const UsersPage = () => {
         {cfg.label}
       </Badge>
     );
+  };
+
+  const totalPages = Math.ceil(filteredUsers.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+
+  const renderPageNumbers = () => {
+    const pages = [];
+    const maxVisiblePages = 5;
+
+    if (totalPages <= maxVisiblePages) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      pages.push(1);
+
+      let start = Math.max(2, currentPage - 1);
+      let end = Math.min(totalPages - 1, currentPage + 1);
+
+      if (currentPage <= 3) {
+        end = 4;
+      } else if (currentPage >= totalPages - 2) {
+        start = totalPages - 3;
+      }
+
+      if (start > 2) {
+        pages.push('ellipsis1');
+      }
+
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+
+      if (end < totalPages - 1) {
+        pages.push('ellipsis2');
+      }
+
+      pages.push(totalPages);
+    }
+
+    return pages.map((page, index) => {
+      if (page === 'ellipsis1' || page === 'ellipsis2') {
+        return (
+          <PaginationItem key={`ellipsis-${index}`}>
+            <PaginationEllipsis />
+          </PaginationItem>
+        );
+      }
+
+      return (
+        <PaginationItem key={page}>
+          <PaginationLink
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setCurrentPage(page as number);
+            }}
+            isActive={currentPage === page}
+            className="cursor-pointer"
+          >
+            {page}
+          </PaginationLink>
+        </PaginationItem>
+      );
+    });
   };
 
   return (
@@ -161,8 +243,8 @@ const UsersPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.length > 0 ? (
-                  filteredUsers.map((user) => (
+                {paginatedUsers.length > 0 ? (
+                  paginatedUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-muted/50">
                       <td className="py-3 flex items-center gap-2">
                         <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
@@ -197,9 +279,42 @@ const UsersPage = () => {
       </div>
 
       {filteredUsers.length > 0 && (
-        <p className="text-sm text-muted-foreground text-right">
-          Showing {filteredUsers.length} of {users.length} users
-        </p>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+          <p className="text-sm text-muted-foreground">
+            Showing {filteredUsers.length > 0 ? startIndex + 1 : 0}–{Math.min(endIndex, filteredUsers.length)} of {filteredUsers.length} users
+            {filteredUsers.length !== users.length && ` (filtered from ${users.length} total)`}
+          </p>
+
+          {totalPages > 1 && (
+            <Pagination className="w-auto mx-0">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (currentPage > 1) setCurrentPage(currentPage - 1);
+                    }}
+                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+
+                {renderPageNumbers()}
+
+                <PaginationItem>
+                  <PaginationNext
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+                    }}
+                    className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          )}
+        </div>
       )}
     </div>
   );
