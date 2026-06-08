@@ -23,6 +23,8 @@ import FundraisingPage from "./pages/FundraisingPage";
 import FundraisingDetailPage from "./pages/FundraisingDetailPage";
 import KYCDetailPage from "./pages/KYCDetailPage";
 import ReconcilePaymentPage from "./pages/ReconcilePaymentPage";
+import AmbassadorApplicationsPage from "./pages/AmbassadorApplicationsPage";
+import AmbassadorDetailPage from "./pages/AmbassadorDetailPage";
 
 const queryClient = new QueryClient();
 
@@ -49,6 +51,8 @@ const App = () => (
             <Route path="kyc" element={<AdminKYCDashboard />} />
             <Route path="kyc/:userId" element={<KYCDetailPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
+            <Route path="ambassadors" element={<AmbassadorApplicationsPage />} />
+            <Route path="ambassadors/:id" element={<AmbassadorDetailPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="reconcile" element={<ReconcilePaymentPage />} />
           </Route>

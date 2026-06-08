@@ -14,6 +14,7 @@ import {
   ArrowLeftRight,
   Heart,
   Wrench,
+  Award,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -80,6 +81,11 @@ export const Sidebar = () => {
       name: 'Transactions',
       icon: ArrowLeftRight,
       path: '/transactions',
+    },
+    {
+      name: 'Ambassadors',
+      icon: Award,
+      path: '/ambassadors',
     },
     {
       name: 'KYC',

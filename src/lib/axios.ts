@@ -32,6 +32,10 @@ export const axiosInstance = axios.create({
 // Add a request interceptor to always use the latest token
 axiosInstance.interceptors.request.use(
   (config) => {
+    if (config.data instanceof FormData) {
+      delete config.headers["Content-Type"];
+    }
+
     let token = localStorage.getItem("kolekto-auth-token");
     if (token) {
       try {
