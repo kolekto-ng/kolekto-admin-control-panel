@@ -13,20 +13,19 @@ import { useWithdrawalsStore } from '@/stores/withdrawalsStore';
 
 const WithdrawalDetailPage = () => {
   const { id } = useParams();
-  const { withdrawals, loading, fetchWithdrawals, approveWithdrawal, rejectWithdrawal, getWithdrawalById } = useWithdrawalsStore();
+  const { selectedWithdrawal, detailLoading, fetchWithdrawalById, approveWithdrawal, rejectWithdrawal } = useWithdrawalsStore();
   const [actionLoading, setActionLoading] = useState(false);
   const { toast } = useToast();
 
-  const withdrawal = id ? getWithdrawalById(id) : null;
+  const withdrawal = selectedWithdrawal;
 
   console.log(withdrawal, 'Withdrawal Detail Page');
 
-
   useEffect(() => {
-    if (withdrawals.length === 0) {
-      fetchWithdrawals();
+    if (id) {
+      fetchWithdrawalById(id);
     }
-  }, [fetchWithdrawals, withdrawals.length]);
+  }, [id, fetchWithdrawalById]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -83,7 +82,7 @@ const WithdrawalDetailPage = () => {
     }
   };
 
-  if (loading) {
+  if (detailLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-6 h-6 animate-spin mr-2" />

@@ -21,8 +21,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { useUsersStore } from "@/stores/usersStore";
-import { useCollectionsStore } from "@/stores/collectionsStore";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 
@@ -66,110 +64,128 @@ const UserDetailPage = () => {
   const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
-  const { getUserById, fetchUsers } = useUsersStore();
-  const { fetchCollections, collections: allCollections } = useCollectionsStore();
-
   const loadData = useCallback(async () => {
     if (!id) return;
 
     try {
-      // Ensure users are loaded
-      let foundUser = getUserById(id);
-      if (!foundUser) {
-        await fetchUsers();
-        foundUser = getUserById(id);
-      }
+      // Fetch User's Profile with nested collections, wallets, withdrawals, and KYC status (single consolidated query)
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select(`
+          id,
+          full_name,
+          email,
+          phone_number,
+          created_at,
+          kyc_verifications(status),
+          collections(
+            id,
+            title,
+            status,
+            created_at,
+            wallets(
+              net_payment,
+              available_balance,
+              pending_balance,
+              ledger_balance,
+              updated_at,
+              created_at
+            ),
+            withdrawals(
+              id,
+              amount,
+              status,
+              created_at
+            )
+          )
+        `)
+        .eq("id", id)
+        .single();
 
-      if (foundUser) {
-        setUser(foundUser);
+      if (profileError) throw profileError;
 
-        // Fetch KYC verification status
-        const { data: kycData } = await supabase
-          .from("kyc_verifications")
-          .select("status")
-          .eq("user_id", id)
-          .single();
-        setVerificationStatus(kycData?.status || 'unverified');
+      if (profileData) {
+        setUser({
+          id: profileData.id,
+          name: profileData.full_name || "Unknown User",
+          email: profileData.email || "",
+          phone: profileData.phone_number || "",
+          joinDate: profileData.created_at || "",
+        });
 
+        // Extract KYC verification status
+        let kycStatus = "unverified";
+        if (profileData.kyc_verifications) {
+          if (Array.isArray(profileData.kyc_verifications)) {
+            if (profileData.kyc_verifications.length > 0) {
+              kycStatus = profileData.kyc_verifications[0]?.status || "unverified";
+            }
+          } else {
+            kycStatus = (profileData.kyc_verifications as any).status || "unverified";
+          }
+        }
+        setVerificationStatus(kycStatus);
 
-        // 1. Fetch User's Collections
-        const { data: userCollections } = await supabase
-          .from("collections")
-          .select("*")
-          .eq("user_id", id)
-          .order("created_at", { ascending: false });
+        const userCollections = profileData.collections || [];
+        setCollections(userCollections);
 
-        setCollections(userCollections || []);
-
-        // 2. Fetch User's Wallets (via collections) to get Balance
+        // Calculate Stats and extract Withdrawals client-side
         let availableBalance = 0;
         let ledgerBalance = 0;
         let pendingBalance = 0;
         let netPayment = 0; // Total Raised across all user's collections
-
-        if (userCollections && userCollections.length > 0) {
-          const collectionIds = userCollections.map((c) => c.id);
-          const { data: wallets } = await supabase
-            .from("wallets")
-            .select("collection_id, net_payment, available_balance, pending_balance, ledger_balance, updated_at")
-            .in("collection_id", collectionIds)
-            .order("updated_at", { ascending: false });
-
-          if (wallets) {
-            // Deduplicate by collection_id (legacy data may have multiple
-            // wallet rows per collection). Keep the most recent row.
-            const latestByCollection: Record<string, any> = {};
-            wallets.forEach((w: any) => {
-              if (!latestByCollection[w.collection_id]) {
-                latestByCollection[w.collection_id] = w;
-              }
-            });
-            Object.values(latestByCollection).forEach((w: any) => {
-              availableBalance += Number(w.available_balance || 0);
-              ledgerBalance += Number(w.ledger_balance || 0);
-              pendingBalance += Number(w.pending_balance || 0);
-              netPayment += Number(w.net_payment || 0);
-            });
-          }
-        }
-
-        // 3. Fetch User's Withdrawals to get Pending & Total Withdrawn
-        // We rely on the withdrawals table for accurate 'Total Withdrawn' history
         let pendingWithdrawal = 0;
         let totalWithdrawn = 0; // Calculated from approved withdrawals
-        let approvedButNotLedgerDeducted = 0; // Track approved amounts to subtract from pending balance
-        let userWithdrawals: any[] = [];
+        let approvedButNotLedgerDeducted = 0;
+        const userWithdrawals: any[] = [];
 
-        if (userCollections && userCollections.length > 0) {
-          const collectionIds = userCollections.map((c) => c.id);
-          const { data: withdrawalData } = await supabase
-            .from("withdrawals")
-            .select("*")
-            .in("collection_id", collectionIds)
-            .order("created_at", { ascending: false });
-
-          userWithdrawals = withdrawalData || [];
-
-          userWithdrawals.forEach((w) => {
-            if (w.status === "pending") {
-              pendingWithdrawal += w.amount;
-            } else if (w.status === "approved" || w.status === "success" || w.status === "paid") {
-              totalWithdrawn += w.amount;
-              // Assuming 'approved' transactions haven't reduced the ledger balance yet,
-              // we treat them as 'locked' funds similar to pending withdrawals.
-              if (w.status === "approved") {
-                approvedButNotLedgerDeducted += w.amount;
+        userCollections.forEach((collection: any) => {
+          // 1. Process Wallets
+          const walletList = collection.wallets;
+          let selectedWallet = null;
+          if (walletList) {
+            if (Array.isArray(walletList)) {
+              if (walletList.length > 0) {
+                selectedWallet = [...walletList].sort((a, b) => 
+                  new Date(b.updated_at || b.created_at || 0).getTime() - 
+                  new Date(a.updated_at || a.created_at || 0).getTime()
+                )[0];
               }
+            } else {
+              selectedWallet = walletList;
             }
-          });
-        }
+          }
+          if (selectedWallet) {
+            availableBalance += Number(selectedWallet.available_balance || 0);
+            ledgerBalance += Number(selectedWallet.ledger_balance || 0);
+            pendingBalance += Number(selectedWallet.pending_balance || 0);
+            netPayment += Number(selectedWallet.net_payment || 0);
+          }
 
-        // Canonical balance definitions (per product spec):
-        //   pending_balance = T+1 incoming funds not yet settled (from wallets table)
-        //   available_balance = settled funds withdrawable now
-        //   ledger_balance (Total Balance) = available + pending
-        //   net_payment = Total Raised (sum of all received funds, net of fees)
-        // Withdrawal states are separate concerns tracked below.
+          // 2. Process Withdrawals
+          const collectionWithdrawals = collection.withdrawals;
+          if (Array.isArray(collectionWithdrawals)) {
+            collectionWithdrawals.forEach((w: any) => {
+              const withdrawalWithCol = { ...w, collection_id: collection.id };
+              userWithdrawals.push(withdrawalWithCol);
+
+              if (w.status === "pending") {
+                pendingWithdrawal += w.amount;
+              } else if (w.status === "approved" || w.status === "success" || w.status === "paid") {
+                totalWithdrawn += w.amount;
+                if (w.status === "approved") {
+                  approvedButNotLedgerDeducted += w.amount;
+                }
+              }
+            });
+          }
+        });
+
+        // Sort withdrawals newest first
+        userWithdrawals.sort((a, b) => 
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        );
+
         const accountBalance = ledgerBalance; // Total Balance = available + pending
         void pendingWithdrawal; void approvedButNotLedgerDeducted; // tracked but not used for balance math
 
@@ -186,12 +202,12 @@ const UserDetailPage = () => {
         const logs: ActivityLogItem[] = [];
 
         // Account Created
-        if (foundUser.joinDate) {
+        if (profileData.created_at) {
           logs.push({
             id: "join-" + id,
             type: "account_created",
             description: "Account created",
-            date: foundUser.joinDate,
+            date: profileData.created_at,
           });
         }
 
@@ -231,7 +247,7 @@ const UserDetailPage = () => {
     } finally {
       if (loading) setLoading(false);
     }
-  }, [id, getUserById, fetchUsers]);
+  }, [id]);
 
   useEffect(() => {
     // Initial load

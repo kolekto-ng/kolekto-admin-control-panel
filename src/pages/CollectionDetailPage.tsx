@@ -16,7 +16,7 @@ interface Contributor {
   name: string;
   amount: number;
   created_at: string;
-  email: string;
+  email?: string;
   status: string;
   contributor_information?: any;
 }
@@ -64,10 +64,10 @@ interface CollectionDetail {
   campaign_category: string | null;
   campaign_summary: string | null;
   campaign_country: string | null;
-  social_links: any;
-  banner_url: string | null;
-  story: any;
-  unique_id_enabled: boolean | null;
+  social_links?: any;
+  banner_url?: string | null;
+  story?: any;
+  unique_id_enabled?: boolean | null;
 }
 
 const CollectionDetailPage = () => {
@@ -84,55 +84,77 @@ const CollectionDetailPage = () => {
     if (!id) return;
     try {
       setLoading(true);
-      // 1. Fetch Collection Details
+      // 1. Fetch Collection Details, Organizer Profile, Wallet, Contributions, and Withdrawals (consolidated query)
       const { data: collectionData, error: collectionError } = await supabase
         .from('collections')
-        .select('*')
+        .select(`
+          id,
+          title,
+          description,
+          status,
+          created_at,
+          amount,
+          total_contributions,
+          type,
+          collection_type,
+          max_contributions,
+          user_id,
+          currency,
+          currency_symbol,
+          contributions_fields,
+          price_tiers,
+          deadline,
+          support_phone_number,
+          slug,
+          rejection_reason,
+          min_contribution,
+          target_amount,
+          event_date,
+          ticket_mode,
+          allow_multiple_quantity,
+          is_open_ended,
+          auto_close,
+          campaign_category,
+          campaign_summary,
+          campaign_country,
+          organizer:user_id(id, full_name, email, phone_number),
+          wallets(net_payment, available_balance, pending_balance, ledger_balance, withdrawn, updated_at, created_at),
+          contributions(id, name, amount, created_at, status),
+          withdrawals(id, amount, status, created_at)
+        `)
         .eq('id', id)
         .single();
 
       if (collectionError) throw collectionError;
       setCollection(collectionData);
+      setOrganizer(collectionData.organizer || null);
 
-      // 2. Fetch Organizer Profile
-      if (collectionData.user_id) {
-        const { data: userData } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', collectionData.user_id)
-          .single();
-        setOrganizer(userData);
+      // Extract the wallet — handle legacy duplicate wallet rows by sorting by updated_at descending
+      const walletList = collectionData.wallets;
+      let selectedWallet = null;
+      if (Array.isArray(walletList) && walletList.length > 0) {
+        selectedWallet = [...walletList].sort((a, b) => 
+          new Date(b.updated_at || b.created_at || 0).getTime() - 
+          new Date(a.updated_at || a.created_at || 0).getTime()
+        )[0];
+      } else if (walletList && !Array.isArray(walletList)) {
+        selectedWallet = walletList;
       }
+      setWallet(selectedWallet);
 
-      // 3. Fetch Contributors
-      const { data: contributionsData } = await supabase
-        .from('contributions')
-        .select('*')
-        .eq('collection_id', id)
-        .order('created_at', { ascending: false });
+      // Extract and sort contributors (created_at descending)
+      const contributionsList = collectionData.contributions || [];
+      const sortedContributors = [...contributionsList].sort((a, b) => 
+        new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      );
+      setContributors(sortedContributors);
 
-      setContributors(contributionsData || []);
-
-      // 4. Fetch Withdrawals
-      const { data: withdrawalsData } = await supabase
-        .from('withdrawals')
-        .select('*')
-        .eq('collection_id', id)
-        .order('created_at', { ascending: false });
-
-      setWithdrawals(withdrawalsData || []);
-
-      // 5. Fetch Wallet — order by updated_at and limit 1 because legacy
-      // data may contain duplicate wallet rows for the same collection
-      // (missing UNIQUE constraint on wallets.collection_id).
-      const { data: walletRows } = await supabase
-        .from('wallets')
-        .select('*')
-        .eq('collection_id', id)
-        .order('updated_at', { ascending: false })
-        .limit(1);
-
-      setWallet((walletRows && walletRows[0]) || null);
+      // Extract and sort withdrawals (created_at descending)
+      const withdrawalsList = collectionData.withdrawals || [];
+      const sortedWithdrawals = [...withdrawalsList].sort((a, b) => 
+        new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      );
+      setWithdrawals(sortedWithdrawals);
 
     } catch (error) {
       console.error('Failed to load collection data:', error);
@@ -281,20 +303,10 @@ const CollectionDetailPage = () => {
     const tierAmount = Number(tier.price || tier.amount);
     const tierName = tier.name || tier.label || 'Unnamed Tier';
 
-    const count = contributors.filter(c => {
+     const count = contributors.filter(c => {
       if (c.status !== 'success' && c.status !== 'paid') return false;
 
-      // Priority 1: Match by explicit Tier Name in contributor_information
-      // This handles cases where the paid amount differs from tier price (e.g. fees included)
-      if (c.contributor_information && Array.isArray(c.contributor_information) && c.contributor_information.length > 0) {
-        const info = c.contributor_information[0];
-        // Check if info.Tier matches tierName (case-insensitive for safety)
-        if (info.Tier && String(info.Tier).toLowerCase() === String(tierName).toLowerCase()) {
-          return true;
-        }
-      }
-
-      // Priority 2: Fallback to fuzzy amount matching if explicit tier info is missing
+      // Fallback to fuzzy amount matching if explicit tier info is missing
       // Allow for a small variance or fee (e.g. up to 5% higher)
       if (Math.abs(c.amount - tierAmount) < 1) return true; // Exact match
 

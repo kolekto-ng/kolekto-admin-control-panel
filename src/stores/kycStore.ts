@@ -20,6 +20,7 @@ export interface KYCFile {
 export interface KYCDocument {
   id: string;
   user_id: string;
+  kyc_verification_id: string | null;
   document_type: DocumentType;
   verification_type: string;
   status: KYCStatus | null;
@@ -39,8 +40,27 @@ export interface KYCVerification {
   address_verified: boolean;
   nin_verified: boolean;
   bank_verified: boolean;
+  selfie_verified: boolean;
+  bvn_verified: boolean;
   completed_at: string | null;
   updated_at: string;
+  // Joined relations
+  profile?: KYCProfile | null;
+  kyc_documents?: KYCDocument[];
+  kyc_verification_history?: KYCHistoryEntry[];
+}
+
+export interface KYCProfile {
+  id: string;
+  full_name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string | null;
+  date_of_birth: string | null;
+  address: string | null;
+  avatar_url: string | null;
+  created_at: string | null;
 }
 
 export interface KYCHistoryEntry {
@@ -124,6 +144,8 @@ interface KYCState {
   // Actions
   fetchKYCList: () => Promise<void>;
   fetchKYCDetail: (userId: string) => Promise<void>;
+  // Returns a signed URL for a given storage path. Called on-demand when viewing a file.
+  getSignedUrl: (filePath: string) => Promise<string>;
   approveDocument: (documentId: string, userId: string) => Promise<{ success: boolean; error?: string }>;
   rejectDocument: (documentId: string, userId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
   approveNIN: (userId: string) => Promise<{ success: boolean; error?: string }>;
@@ -144,10 +166,15 @@ export const useKYCStore = create<KYCState>((set, get) => ({
   fetchKYCList: async () => {
     set({ loading: true, error: null });
     try {
-      // Fetch all KYC verifications with joined profile data
+      // Single query: verifications + profile join
       const { data: verifications, error: vError } = await supabase
         .from("kyc_verifications")
-        .select("*")
+        .select(`
+          *,
+          profile:user_id (
+            id, full_name, email, phone_number, date_of_birth, avatar_url
+          )
+        `)
         .order("updated_at", { ascending: false });
 
       if (vError) throw vError;
@@ -161,23 +188,9 @@ export const useKYCStore = create<KYCState>((set, get) => ({
         return;
       }
 
-      // Fetch profiles for all users in verifications
-      const userIds = verifications.map((v) => v.user_id);
-      const { data: profiles, error: pError } = await supabase
-        .from("profiles")
-        .select("id, full_name, email, phone_number, date_of_birth, avatar_url")
-        .in("id", userIds);
-
-      if (pError) throw pError;
-
-      const profileMap: Record<string, any> = {};
-      (profiles || []).forEach((p) => {
-        profileMap[p.id] = p;
-      });
-
-      // Build list items
-      const kycUsers: KYCUserListItem[] = verifications.map((v) => {
-        const profile = profileMap[v.user_id] || {};
+      // Build list items directly from joined data
+      const kycUsers: KYCUserListItem[] = verifications.map((v: any) => {
+        const profile = v.profile || {};
         return {
           user_id: v.user_id,
           full_name: profile.full_name || "Unknown",
@@ -213,79 +226,52 @@ export const useKYCStore = create<KYCState>((set, get) => ({
   fetchKYCDetail: async (userId: string) => {
     set({ detailLoading: true, error: null });
     try {
-      // Fetch profile
-      const { data: profile, error: pError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .single();
-
-      if (pError) throw pError;
-
-      // Fetch KYC verification record
-      const { data: verification } = await supabase
+      // Single joined query: verification + profile + documents + files + history
+      const { data: verificationData, error: vError } = await supabase
         .from("kyc_verifications")
-        .select("*")
+        .select(`
+          *,
+          profile:user_id (
+            id, full_name, first_name, last_name, email,
+            phone_number, date_of_birth, address, avatar_url, created_at
+          ),
+          kyc_documents (
+            *,
+            kyc_files (*)
+          ),
+          kyc_verification_history (
+            *
+          )
+        `)
         .eq("user_id", userId)
+        .order("uploaded_at", { ascending: false, referencedTable: "kyc_documents" })
+        .order("changed_at", { ascending: false, referencedTable: "kyc_verification_history" })
         .single();
 
-      // Fetch NIN identity info
+      if (vError) throw vError;
+
+      // NIN is still a separate query (encrypted separately, not joined via profiles)
       const { data: identityData } = await supabase
         .from("user_identity")
         .select("nin_last4")
         .eq("user_id", userId)
         .single();
 
-      // Fetch all KYC documents for this user
-      const { data: documents, error: dError } = await supabase
-        .from("kyc_documents")
-        .select("*")
-        .eq("user_id", userId)
-        .order("uploaded_at", { ascending: false });
+      const profile: KYCProfile = verificationData.profile || {};
+      const rawDocuments: any[] = verificationData.kyc_documents || [];
+      const history: KYCHistoryEntry[] = verificationData.kyc_verification_history || [];
 
-      if (dError) throw dError;
-
-      // Fetch all files for these documents
-      let filesMap: Record<string, KYCFile[]> = {};
-      if (documents && documents.length > 0) {
-        const docIds = documents.map((d) => d.id);
-        const { data: files } = await supabase
-          .from("kyc_files")
-          .select("*")
-          .in("document_id", docIds);
-
-        // Generate signed URLs for each file
-        if (files) {
-          for (const file of files) {
-            try {
-              const { data: urlData } = await supabase.storage
-                .from("kyc-documents")
-                .createSignedUrl(file.file_path, 3600);
-              (file as any).signed_url = urlData?.signedUrl || "";
-            } catch {
-              (file as any).signed_url = "";
-            }
-
-            if (!filesMap[file.document_id]) filesMap[file.document_id] = [];
-            filesMap[file.document_id].push(file as KYCFile);
-          }
-        }
-      }
-
-      // Build documents with files
-      const enrichedDocuments: KYCDocument[] = (documents || []).map((doc) => ({
+      // Store files as-is — signed URLs are generated lazily when a file is viewed
+      const enrichedDocuments: KYCDocument[] = rawDocuments.map((doc: any) => ({
         ...doc,
         document_type: doc.document_type as DocumentType,
         status: doc.status as KYCStatus | null,
-        files: filesMap[doc.id] || [],
+        files: (doc.kyc_files || []) as KYCFile[],
       }));
 
-      // Fetch history
-      const { data: history } = await supabase
-        .from("kyc_verification_history")
-        .select("*")
-        .eq("user_id", userId)
-        .order("changed_at", { ascending: false });
+      // Strip the nested relations from the verification object
+      const { profile: _p, kyc_documents: _d, kyc_verification_history: _h, ...cleanVerification } =
+        verificationData as any;
 
       const detail: KYCUserDetail = {
         user_id: profile.id,
@@ -298,16 +284,30 @@ export const useKYCStore = create<KYCState>((set, get) => ({
         address: profile.address || null,
         avatar_url: profile.avatar_url || null,
         created_at: profile.created_at || null,
-        verification: verification || null,
+        verification: cleanVerification as KYCVerification,
         nin_last4: identityData?.nin_last4 || null,
         documents: enrichedDocuments,
-        history: history || [],
+        history,
       };
 
       set({ selectedUser: detail, detailLoading: false });
     } catch (err: any) {
       console.error("Error fetching KYC detail:", err);
       set({ error: "Failed to load KYC details", detailLoading: false });
+    }
+  },
+
+  // ── Get Signed URL (on-demand) ─────────────────────────────────────────────
+
+  getSignedUrl: async (filePath: string): Promise<string> => {
+    try {
+      const { data, error } = await supabase.storage
+        .from("kyc-documents")
+        .createSignedUrl(filePath, 3600);
+      if (error || !data?.signedUrl) return "";
+      return data.signedUrl;
+    } catch {
+      return "";
     }
   },
 
@@ -487,18 +487,23 @@ export const useKYCStore = create<KYCState>((set, get) => ({
 // ── Helper: Recalculate overall KYC verification status ────────────────────
 
 async function recalculateVerificationStatus(userId: string) {
-  // Fetch all documents for this user
-  const { data: allDocs } = await supabase
-    .from("kyc_documents")
-    .select("document_type, status")
-    .eq("user_id", userId);
+  // Fetch all documents via kyc_verification_id join (more efficient now that FK exists)
+  const { data: verification } = await supabase
+    .from("kyc_verifications")
+    .select("id, nin_verified, kyc_documents(document_type, status)")
+    .eq("user_id", userId)
+    .single();
 
-  if (!allDocs || allDocs.length === 0) return;
+  if (!verification) return;
 
-  // Group by document type and get the latest status
+  const allDocs: { document_type: string; status: string | null }[] =
+    (verification as any).kyc_documents || [];
+
+  if (allDocs.length === 0) return;
+
+  // Group by document type — verified wins
   const typeStatusMap: Record<string, string> = {};
   allDocs.forEach((doc) => {
-    // If any doc of this type is verified, mark it as verified
     if (doc.status === "verified") {
       typeStatusMap[doc.document_type] = "verified";
     } else if (!typeStatusMap[doc.document_type]) {
@@ -508,14 +513,7 @@ async function recalculateVerificationStatus(userId: string) {
 
   const identityVerified = typeStatusMap["identity"] === "verified";
   const addressVerified = typeStatusMap["address"] === "verified";
-
-  // Fetch current nin_verified from DB (we don't change it here)
-  const { data: currentVerification } = await supabase
-    .from("kyc_verifications")
-    .select("nin_verified")
-    .eq("user_id", userId)
-    .single();
-  const ninVerified = currentVerification?.nin_verified || false;
+  const ninVerified = verification.nin_verified || false;
 
   // Determine overall status
   const anyRejected = allDocs.some((d) => d.status === "rejected");

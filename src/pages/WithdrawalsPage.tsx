@@ -13,6 +13,15 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 
 const WithdrawalsPage = () => {
   const { withdrawals, loading, error, fetchWithdrawals, approveWithdrawal, rejectWithdrawal } = useWithdrawalsStore();
@@ -39,6 +48,9 @@ const WithdrawalsPage = () => {
   console.log('Withdrawals:', withdrawals);
 
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
+
   useEffect(() => {
     let filtered = withdrawals;
 
@@ -58,7 +70,75 @@ const WithdrawalsPage = () => {
     }
 
     setFilteredWithdrawals(filtered);
+    setCurrentPage(1);
   }, [searchTerm, currentTab, withdrawals]);
+
+  const totalPages = Math.ceil(filteredWithdrawals.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedWithdrawals = filteredWithdrawals.slice(startIndex, endIndex);
+
+  const renderPageNumbers = () => {
+    const pages = [];
+    const maxVisiblePages = 5;
+
+    if (totalPages <= maxVisiblePages) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      pages.push(1);
+
+      let start = Math.max(2, currentPage - 1);
+      let end = Math.min(totalPages - 1, currentPage + 1);
+
+      if (currentPage <= 3) {
+        end = 4;
+      } else if (currentPage >= totalPages - 2) {
+        start = totalPages - 3;
+      }
+
+      if (start > 2) {
+        pages.push('ellipsis1');
+      }
+
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+
+      if (end < totalPages - 1) {
+        pages.push('ellipsis2');
+      }
+
+      pages.push(totalPages);
+    }
+
+    return pages.map((page, index) => {
+      if (page === 'ellipsis1' || page === 'ellipsis2') {
+        return (
+          <PaginationItem key={`ellipsis-${index}`}>
+            <PaginationEllipsis />
+          </PaginationItem>
+        );
+      }
+
+      return (
+        <PaginationItem key={page}>
+          <PaginationLink
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setCurrentPage(page as number);
+            }}
+            isActive={currentPage === page}
+            className="cursor-pointer"
+          >
+            {page}
+          </PaginationLink>
+        </PaginationItem>
+      );
+    });
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -177,8 +257,8 @@ const WithdrawalsPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredWithdrawals.length > 0 ? (
-                  filteredWithdrawals.map((withdrawal) => (
+                {paginatedWithdrawals.length > 0 ? (
+                  paginatedWithdrawals.map((withdrawal) => (
                     <tr key={withdrawal.id} className="hover:bg-muted/50">
                       <td className="py-3 font-medium">
                         <Button variant="link" className="p-0 h-auto font-medium text-foreground hover:underline" asChild>
@@ -249,6 +329,45 @@ const WithdrawalsPage = () => {
           </div>
         )}
       </div>
+
+      {filteredWithdrawals.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+          <p className="text-sm text-muted-foreground">
+            Showing {filteredWithdrawals.length > 0 ? startIndex + 1 : 0}–{Math.min(endIndex, filteredWithdrawals.length)} of {filteredWithdrawals.length} withdrawal requests
+            {filteredWithdrawals.length !== withdrawals.length && ` (filtered from ${withdrawals.length} total)`}
+          </p>
+
+          {totalPages > 1 && (
+            <Pagination className="w-auto mx-0">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (currentPage > 1) setCurrentPage(currentPage - 1);
+                    }}
+                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+
+                {renderPageNumbers()}
+
+                <PaginationItem>
+                  <PaginationNext
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+                    }}
+                    className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          )}
+        </div>
+      )}
     </div>
   );
 };

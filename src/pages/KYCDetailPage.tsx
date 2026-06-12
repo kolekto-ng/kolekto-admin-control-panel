@@ -63,6 +63,7 @@ const KYCDetailPage = () => {
     detailLoading,
     error,
     fetchKYCDetail,
+    getSignedUrl,
     approveDocument,
     rejectDocument,
     approveNIN,
@@ -70,7 +71,6 @@ const KYCDetailPage = () => {
     addFeedback,
   } = useKYCStore();
   const { toast } = useToast();
-
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -79,8 +79,12 @@ const KYCDetailPage = () => {
   const [feedbackNote, setFeedbackNote] = useState('');
   const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [viewingDoc, setViewingDoc] = useState<KYCDocument | null>(null);
+  const [activeTab, setActiveTab] = useState<'selfie' | 'document' | 'side-by-side'>('selfie');
   const [showNINRejectDialog, setShowNINRejectDialog] = useState(false);
   const [ninRejectReason, setNINRejectReason] = useState('');
+  // Lazy signed URLs: fetched only when a document is opened for viewing
+  const [fileUrlsLoading, setFileUrlsLoading] = useState(false);
+  const [urlCache, setUrlCache] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (userId) fetchKYCDetail(userId);
@@ -166,9 +170,28 @@ const KYCDetailPage = () => {
     }
   };
 
-  const openDocumentViewer = (doc: KYCDocument) => {
+  const openDocumentViewer = async (doc: KYCDocument) => {
     setViewingDoc(doc);
+    if (doc.document_type === 'identity') {
+      setActiveTab('selfie');
+    } else {
+      setActiveTab('document');
+    }
     setShowDocumentModal(true);
+
+    // Fetch signed URLs only for files that aren't already cached
+    const uncachedFiles = doc.files.filter((f) => !urlCache[f.file_path]);
+    if (uncachedFiles.length === 0) return;
+
+    setFileUrlsLoading(true);
+    const entries = await Promise.all(
+      uncachedFiles.map(async (f) => {
+        const url = await getSignedUrl(f.file_path);
+        return [f.file_path, url] as [string, string];
+      })
+    );
+    setUrlCache((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    setFileUrlsLoading(false);
   };
 
   const getStatusBadge = (status: string | null) => {
@@ -620,35 +643,44 @@ const KYCDetailPage = () => {
               Review the uploaded document. You can view it at full size or download it.
             </DialogDescription>
           </DialogHeader>
-          {viewingDoc && viewingDoc.files.length > 0 && (
-            <div className="space-y-4">
-              {viewingDoc.files.map((file) => (
+          {(() => {
+            if (!viewingDoc) return null;
+
+            const isIdentity = viewingDoc.document_type === 'identity';
+            const selfieFiles = viewingDoc.files.filter(f => f.file_name.toLowerCase().includes('selfie'));
+            const documentFiles = viewingDoc.files.filter(f => !f.file_name.toLowerCase().includes('selfie'));
+            const hasSelfieAndDoc = selfieFiles.length > 0 && documentFiles.length > 0;
+
+            const renderFileItem = (file: KYCFile) => {
+              const signedUrl = urlCache[file.file_path];
+              return (
                 <div key={file.id} className="space-y-3">
-                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                    <div>
-                      <p className="font-medium text-sm">{file.file_name}</p>
-                      <p className="text-xs text-muted-foreground">
+                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-gray-100 shadow-sm">
+                    <div className="min-w-0 flex-1 mr-4">
+                      <p className="font-medium text-sm truncate" title={file.file_name}>{file.file_name}</p>
+                      <p className="text-xs text-muted-foreground font-mono">
                         {file.uploaded_at ? formatDateTime(file.uploaded_at) : ''} •{' '}
                         {file.file_size ? `${(file.file_size / (1024 * 1024)).toFixed(2)} MB` : 'Unknown size'}
                       </p>
                     </div>
-                    {file.signed_url && (
+                    {signedUrl && (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => window.open(file.signed_url, '_blank')}
+                        onClick={() => window.open(signedUrl, '_blank')}
+                        className="flex-shrink-0"
                       >
                         <ExternalLink className="h-4 w-4 mr-1.5" />
                         Open Full Size
                       </Button>
                     )}
                   </div>
-                  {file.signed_url && (
-                    <div className="border rounded-lg p-2">
+                  {signedUrl && (
+                    <div className="border rounded-lg p-2 bg-gray-50/50 flex justify-center items-center">
                       <img
-                        src={file.signed_url}
+                        src={signedUrl}
                         alt={file.file_name}
-                        className="w-full max-h-96 object-contain rounded"
+                        className="w-full max-h-[50vh] object-contain rounded shadow-sm hover:scale-[1.01] transition-transform duration-200"
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none';
                         }}
@@ -656,16 +688,116 @@ const KYCDetailPage = () => {
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-          {viewingDoc && viewingDoc.files.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <FileText className="h-10 w-10 text-gray-200 mx-auto mb-3" />
-              <p>No files attached to this document</p>
-            </div>
-          )}
-          <DialogFooter className="gap-2">
+              );
+            };
+
+            if (viewingDoc.files.length === 0) {
+              return (
+                <div className="text-center py-8 text-muted-foreground">
+                  <FileText className="h-10 w-10 text-gray-200 mx-auto mb-3" />
+                  <p>No files attached to this document</p>
+                </div>
+              );
+            }
+
+            if (fileUrlsLoading) {
+              return (
+                <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+                  <Loader2 className="h-7 w-7 animate-spin text-indigo-500" />
+                  <p className="text-sm">Loading document files...</p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                {isIdentity && hasSelfieAndDoc && (
+                  <div className="flex border-b border-gray-200 bg-gray-50/50 p-1 rounded-lg sticky top-0 z-10 backdrop-blur-sm shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('selfie')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-200 flex items-center justify-center gap-2 ${
+                        activeTab === 'selfie'
+                          ? 'bg-white text-indigo-600 shadow-sm border border-gray-200/50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50'
+                      }`}
+                    >
+                      <User className="h-4 w-4" />
+                      Selfie Upload
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('document')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-200 flex items-center justify-center gap-2 ${
+                        activeTab === 'document'
+                          ? 'bg-white text-indigo-600 shadow-sm border border-gray-200/50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50'
+                      }`}
+                    >
+                      <FileText className="h-4 w-4" />
+                      ID Document
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('side-by-side')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-200 flex items-center justify-center gap-2 ${
+                        activeTab === 'side-by-side'
+                          ? 'bg-white text-indigo-600 shadow-sm border border-gray-200/50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/50'
+                      }`}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Side-by-Side View
+                    </button>
+                  </div>
+                )}
+
+                {isIdentity && hasSelfieAndDoc ? (
+                  <>
+                    {activeTab === 'selfie' && (
+                      <div className="space-y-4">
+                        {selfieFiles.map(renderFileItem)}
+                      </div>
+                    )}
+
+                    {activeTab === 'document' && (
+                      <div className="space-y-4">
+                        {documentFiles.map(renderFileItem)}
+                      </div>
+                    )}
+
+                    {activeTab === 'side-by-side' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 p-2 bg-indigo-50/50 border border-indigo-100 rounded-lg text-indigo-700 text-sm font-semibold sticky top-0 z-10 backdrop-blur-sm">
+                            <User className="h-4 w-4" />
+                            Selfie Photo
+                          </div>
+                          <div className="space-y-4">
+                            {selfieFiles.map(renderFileItem)}
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 p-2 bg-emerald-50/50 border border-emerald-100 rounded-lg text-emerald-700 text-sm font-semibold sticky top-0 z-10 backdrop-blur-sm">
+                            <FileText className="h-4 w-4" />
+                            Government-Issued ID
+                          </div>
+                          <div className="space-y-4">
+                            {documentFiles.map(renderFileItem)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-4">
+                    {viewingDoc.files.map(renderFileItem)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter className="gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setShowDocumentModal(false)}>
               Close
             </Button>

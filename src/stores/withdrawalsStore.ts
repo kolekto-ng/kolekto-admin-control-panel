@@ -20,17 +20,22 @@ export interface Withdrawal {
 
 interface WithdrawalsState {
   withdrawals: Withdrawal[];
+  selectedWithdrawal: Withdrawal | null;
   loading: boolean;
+  detailLoading: boolean;
   error: string | null;
   fetchWithdrawals: () => Promise<void>;
   getWithdrawalById: (id: string) => Withdrawal | undefined;
+  fetchWithdrawalById: (id: string) => Promise<void>;
   approveWithdrawal: (id: string) => Promise<void>;
   rejectWithdrawal: (id: string) => Promise<void>;
 }
 
 export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
   withdrawals: [],
+  selectedWithdrawal: null,
   loading: false,
+  detailLoading: false,
   error: null,
 
   fetchWithdrawals: async () => {
@@ -41,9 +46,19 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
         .from("withdrawals")
         .select(
           `
-          *,
+          id,
+          collection_id,
+          user_id,
+          amount,
+          created_at,
+          status,
           collections (
-            title          )
+            title,
+            profiles (
+              full_name,
+              email
+            )
+          )
         `
         )
         .order("created_at", { ascending: false });
@@ -52,43 +67,25 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
         throw error;
       }
 
-      const withdrawalsWithProfiles = await Promise.all(
-        withdrawalsData.map(async (w) => {
-          const { data: profile, error: profileError } = await supabase
-            .from("profiles")
-            .select("id, full_name, email")
-            .eq("id", w.user_id)
-            .single();
+      const items = withdrawalsData || [];
 
-          if (profileError) console.error(profileError);
-
-          return {
-            ...w,
-            profile, // attach profile objec
-          };
-        })
-      );
-
-      console.log(withdrawalsWithProfiles, "withdrawalsWithProfiles");
-
-      const formattedWithdrawals: Withdrawal[] =
-        withdrawalsWithProfiles?.map((withdrawal: any) => ({
-          id: withdrawal.id,
-          collectionId: withdrawal.collection_id,
-          collectionName: withdrawal.collections?.title || "Unknown Collection",
-          hostId: withdrawal.user_id,
-          hostName: withdrawal.profile?.full_name || "Unknown Host",
-          hostEmail: withdrawal.profile?.email || "unknown@example.com",
-          requestedAmount: withdrawal.amount,
-          dateRequested: withdrawal.created_at,
-          status: withdrawal.status,
-          bankName:
-            withdrawal.destination_account.bank_name ||
-            withdrawal.destination_account.bank_code ||
-            "Unknown Bank",
-          accountNumber: withdrawal.destination_account.accountNumber,
-          accountName: withdrawal.destination_account.accountName,
-        })) || [];
+      const formattedWithdrawals: Withdrawal[] = items.map((w: any) => {
+        const profile = w.collections?.profiles;
+        return {
+          id: w.id,
+          collectionId: w.collection_id,
+          collectionName: w.collections?.title || "Unknown Collection",
+          hostId: w.user_id,
+          hostName: profile?.full_name || "Unknown Host",
+          hostEmail: profile?.email || "unknown@example.com",
+          requestedAmount: w.amount,
+          dateRequested: w.created_at,
+          status: w.status,
+          bankName: "",
+          accountNumber: "",
+          accountName: "",
+        };
+      });
 
       set({
         withdrawals: formattedWithdrawals,
@@ -100,6 +97,54 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
         error: "Failed to load withdrawals",
         loading: false,
       });
+    }
+  },
+
+  fetchWithdrawalById: async (id: string) => {
+    set({ detailLoading: true, error: null });
+    try {
+      const { data: w, error } = await supabase
+        .from("withdrawals")
+        .select(`
+          *,
+          collections (
+            title,
+            profiles (
+              full_name,
+              email
+            )
+          )
+        `)
+        .eq("id", id)
+        .single();
+
+      if (error) throw error;
+      if (!w) throw new Error("Withdrawal request not found");
+
+      const profile = w.collections?.profiles;
+
+      const formatted: Withdrawal = {
+        id: w.id,
+        collectionId: w.collection_id,
+        collectionName: w.collections?.title || "Unknown Collection",
+        hostId: w.user_id,
+        hostName: profile?.full_name || "Unknown Host",
+        hostEmail: profile?.email || "unknown@example.com",
+        requestedAmount: w.amount,
+        dateRequested: w.created_at,
+        status: w.status,
+        bankName:
+          w.destination_account?.bank_name ||
+          w.destination_account?.bank_code ||
+          "Unknown Bank",
+        accountNumber: w.destination_account?.accountNumber || "",
+        accountName: w.destination_account?.accountName || "",
+      };
+
+      set({ selectedWithdrawal: formatted, detailLoading: false });
+    } catch (err: any) {
+      console.error("Error fetching withdrawal detail:", err);
+      set({ error: "Failed to load withdrawal details", detailLoading: false });
     }
   },
 
