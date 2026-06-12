@@ -66,9 +66,7 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
       if (error) {
         throw error;
       }
-
       const items = withdrawalsData || [];
-
       const formattedWithdrawals: Withdrawal[] = items.map((w: any) => {
         const profile = w.collections?.profiles;
         return {
