@@ -14,6 +14,9 @@ export interface Collection {
   type: string;
   targetAmount: number;
   raisedAmount: number;
+  totalBalance: number;
+  availableBalance: number;
+  pendingBalance: number;
   contributors: number;
   status: string;
   deadline: string;

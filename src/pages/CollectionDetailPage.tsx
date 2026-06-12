@@ -18,6 +18,7 @@ interface Contributor {
   created_at: string;
   email?: string;
   status: string;
+  contributor_information?: any;
 }
 
 interface Withdrawal {
@@ -40,6 +41,11 @@ interface CollectionDetail {
   max_contributions: number | null;
   user_id: string;
   currency: string;
+  contributions_fields: any; // JSON
+  price_tiers?: any; // JSON column in DB for tiers
+  deadline: string | null;
+  support_phone_number?: string | null;
+  total_contributions_count?: number;
   currency_symbol: string;
   contributions_fields: any;
   price_tiers: any;
@@ -200,6 +206,13 @@ const CollectionDetailPage = () => {
   }
 
   // Calculations
+  const grossRaised = contributors.reduce((sum, c) => (c.status === 'success' || c.status === 'paid' ? sum + c.amount : sum), 0);
+  const totalWithdrawn = withdrawals.reduce((sum, w) => (w.status === 'approved' || w.status === 'success' ? sum + w.amount : sum), 0);
+  const totalBalance = wallet?.ledger_balance ?? (grossRaised - totalWithdrawn);
+  
+  const raisedAmount = grossRaised; // Gross amount for progress and display
+  const targetAmount = collection.amount || 0;
+  const progressPercentage = targetAmount > 0 ? Math.min(100, Math.round((raisedAmount / targetAmount) * 100)) : 0;
   // Total Raised = total amount ever received for this collection (net of fees).
   // Authoritative source = sum of paid contributions. Fall back to wallet.net_payment.
   const paidContributors = contributors.filter(c => c.status === 'success' || c.status === 'paid');
@@ -209,6 +222,34 @@ const CollectionDetailPage = () => {
   const contributorCount = paidContributors.length;
   const displayContributorCount = collection.total_contributions > contributorCount ? collection.total_contributions : contributorCount;
 
+  // Financial Stats with 5 AM Settlement Rule
+  // Rule: Payments become available the next day at 5 AM
+  const now = new Date();
+  const today5am = new Date(now);
+  today5am.setHours(5, 0, 0, 0);
+  
+  // Cutoff is the start of the day after which payments are not yet settled
+  // If before 5 AM, only payments from day-before-yesterday and older are available
+  // If after 5 AM, payments from yesterday and older are available
+  const cutoffDate = now < today5am 
+    ? new Date(new Date(now).setHours(0, 0, 0, 0) - 24 * 60 * 60 * 1000) 
+    : new Date(new Date(now).setHours(0, 0, 0, 0));
+
+  const settledRaised = contributors
+    .filter(c => (c.status === 'success' || c.status === 'paid') && new Date(c.created_at) < cutoffDate)
+    .reduce((sum, c) => sum + c.amount, 0);
+
+  const availableForWithdrawal = Math.max(0, settledRaised - totalWithdrawn);
+  
+  const availableBalance = availableForWithdrawal;
+  const ledgerBalance = totalBalance;
+  const pendingBalance = Math.max(0, ledgerBalance - availableBalance);
+
+  // Type determination
+  const typeLower = (collection.type || '').toLowerCase();
+  const isFixed = typeLower.includes('fixed');
+  const isTiered = typeLower.includes('tier');
+  const isFundraiser = typeLower.includes('fund');
   // Financial Stats from Wallet (canonical definitions):
   //   - Total Balance    = ledger_balance    (total raised minus completed withdrawals)
   //   - Available        = available_balance (settled past T+1, withdrawable now)

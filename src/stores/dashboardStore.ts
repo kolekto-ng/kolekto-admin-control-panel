@@ -59,6 +59,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         { data: collectionTypeData },
         { data: recentContributions },
         { data: recentWithdrawals },
+        { data: walletsData },
+      ] = await Promise.all([
+        supabase.from("profiles").select("*", { count: "exact", head: true }),
+        supabase
+          .from("collections")
+          .select("*", { count: "exact", head: true }),
         { count: pendingKyc },
         { count: totalKycSubmissions },
       ] = await Promise.all([
@@ -117,6 +123,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         const ct = c.collection_type || c.type || "fixed";
         collectionsByType[ct] = (collectionsByType[ct] || 0) + 1;
       });
+
+      const totalAvailableBalance = walletsData?.reduce((sum, w) => sum + (w.available_balance || 0), 0) || 0;
+      const totalLedgerBalance = walletsData?.reduce((sum, w) => sum + (w.ledger_balance || 0), 0) || 0;
+      const totalPendingBalance = Math.max(0, totalLedgerBalance - totalAvailableBalance);
 
       const stats: DashboardStats = {
         totalUsers: totalUsers || 0,
