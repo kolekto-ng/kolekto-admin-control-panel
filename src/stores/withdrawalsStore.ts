@@ -97,7 +97,6 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
       });
     }
   },
-
   fetchWithdrawalById: async (id: string) => {
     set({ detailLoading: true, error: null });
     try {
