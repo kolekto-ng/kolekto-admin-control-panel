@@ -93,8 +93,10 @@ export const useCollectionsStore = create<CollectionsState>((set, get) => ({
           ? (profile.full_name || profile.email || "Unknown User")
           : "Unknown Organizer";
 
-        // Determine canonical collection_type: prefer new field, fallback to legacy type
-        const collectionType = collection.collection_type || collection.type || 'fixed';
+        // Determine canonical collection_type: prefer more specific type if collection_type is 'fixed' (as it defaults to 'fixed' in the database)
+        const collectionType = (collection.collection_type && collection.collection_type !== 'fixed')
+          ? collection.collection_type
+          : (collection.type || 'fixed');
 
         return {
           data: collection,

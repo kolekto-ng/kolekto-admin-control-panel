@@ -114,7 +114,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       // Build collection type breakdown
       const collectionsByType: Record<string, number> = {};
       (collectionTypeData || []).forEach((c: any) => {
-        const ct = c.collection_type || c.type || "fixed";
+        const ct = (c.collection_type && c.collection_type !== 'fixed')
+          ? c.collection_type
+          : (c.type || "fixed");
         collectionsByType[ct] = (collectionsByType[ct] || 0) + 1;
       });
 

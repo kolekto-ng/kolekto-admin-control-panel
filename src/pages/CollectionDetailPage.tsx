@@ -220,8 +220,10 @@ const CollectionDetailPage = () => {
   const totalBalance = ledgerBalance; // "Total Balance" per product definition
   const totalWithdrawn = Number(wallet?.withdrawn || 0);
 
-  // Type determination — use collection_type first (canonical), fall back to type
-  const canonicalType = (collection.collection_type || collection.type || 'fixed').toLowerCase();
+  // Type determination — use more specific type if collection_type is 'fixed' (as it defaults in DB)
+  const canonicalType = ((collection.collection_type && collection.collection_type !== 'fixed')
+    ? collection.collection_type
+    : (collection.type || 'fixed')).toLowerCase();
   const isFixed = canonicalType === 'fixed' || canonicalType === 'flat';
   const isTiered = canonicalType === 'tiered';
   const isFundraiser = canonicalType === 'fundraising';
@@ -296,7 +298,9 @@ const CollectionDetailPage = () => {
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               {getStatusBadge(collection.status)}
               <Badge variant="outline" className="capitalize">
-                {collection.collection_type || collection.type}
+                {(collection.collection_type && collection.collection_type !== 'fixed')
+                  ? collection.collection_type
+                  : (collection.type || 'fixed')}
               </Badge>
               {collection.campaign_category && (
                 <Badge variant="secondary" className="text-xs">{collection.campaign_category}</Badge>

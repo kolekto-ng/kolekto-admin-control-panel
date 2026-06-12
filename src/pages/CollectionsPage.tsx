@@ -88,9 +88,12 @@ const CollectionsPage = () => {
     }
 
     if (typeFilter !== 'all') {
-      filtered = filtered.filter(collection =>
-        (collection.collection_type || collection.type) === typeFilter
-      );
+      filtered = filtered.filter(collection => {
+        const canonicalType = (collection.collection_type && collection.collection_type !== 'fixed')
+          ? collection.collection_type
+          : (collection.type || 'fixed');
+        return canonicalType === typeFilter;
+      });
     }
 
     setFilteredCollections(filtered);
@@ -127,7 +130,9 @@ const CollectionsPage = () => {
 
   // Count by type for summary
   const typeCounts = collections.reduce((acc: Record<string, number>, c) => {
-    const t = c.collection_type || c.type || 'fixed';
+    const t = (c.collection_type && c.collection_type !== 'fixed')
+      ? c.collection_type
+      : (c.type || 'fixed');
     acc[t] = (acc[t] || 0) + 1;
     return acc;
   }, {});
@@ -309,7 +314,11 @@ const CollectionsPage = () => {
                         )}
                       </td>
                       <td>
-                        {getTypeBadge(collection.collection_type || collection.type || 'fixed')}
+                        {getTypeBadge(
+                          (collection.collection_type && collection.collection_type !== 'fixed')
+                            ? collection.collection_type
+                            : (collection.type || 'fixed')
+                        )}
                       </td>
                       <td>
                         <Button variant="link" className="p-0 h-auto font-normal text-foreground" asChild>
