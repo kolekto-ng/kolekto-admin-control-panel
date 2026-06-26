@@ -29,6 +29,7 @@ interface ReconcileResult {
 const ReconcilePaymentPage = () => {
   const { toast } = useToast();
   const [reference, setReference] = useState("");
+  const [collectionId, setCollectionId] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ReconcileResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +46,10 @@ const ReconcilePaymentPage = () => {
     setResult(null);
 
     try {
+      const cid = collectionId.trim();
       const { data } = await axiosInstance.post<ReconcileResult>(
         "/adminurlabdkole/reconcile-payment",
-        { reference: ref }
+        cid ? { reference: ref, collectionId: cid } : { reference: ref }
       );
       setResult(data);
       toast({
@@ -70,6 +72,8 @@ const ReconcilePaymentPage = () => {
         userMessage = "Please paste a Paystack reference.";
       } else if (status === 400 && code === "INVALID_REFERENCE") {
         userMessage = "The reference looks malformed. Copy it again from Paystack.";
+      } else if (status === 400 && code === "INVALID_COLLECTION_ID") {
+        userMessage = "The collection ID looks malformed.";
       } else if (!status) {
         userMessage = "Could not reach the backend. Check your connection.";
       }
@@ -128,6 +132,27 @@ const ReconcilePaymentPage = () => {
               />
               <p className="text-xs text-muted-foreground">
                 Find this on Paystack dashboard → Transactions → Reference column.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="collectionId">Collection ID (optional)</Label>
+              <Input
+                id="collectionId"
+                value={collectionId}
+                onChange={(e) => setCollectionId(e.target.value)}
+                placeholder="Only needed if reconciliation says metadata is missing"
+                disabled={loading}
+                className="font-mono"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave blank normally. Only fill this in if a first attempt failed with
+                "Missing collection ID in payment metadata" — confirm the right
+                collection on Paystack (by the contributor's email/amount/time) before
+                pasting its ID here.
               </p>
             </div>
 
