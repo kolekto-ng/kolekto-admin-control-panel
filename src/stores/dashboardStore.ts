@@ -14,6 +14,9 @@ export interface DashboardStats {
   activeCampaigns: number;
   pendingKyc: number;
   totalKycSubmissions: number;
+  totalAvailableBalance: number;
+  totalLedgerBalance: number;
+  totalPendingBalance: number;
   // Collection type breakdown
   collectionsByType: Record<string, number>;
 }
@@ -60,11 +63,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         { data: recentContributions },
         { data: recentWithdrawals },
         { data: walletsData },
-      ] = await Promise.all([
-        supabase.from("profiles").select("*", { count: "exact", head: true }),
-        supabase
-          .from("collections")
-          .select("*", { count: "exact", head: true }),
         { count: pendingKyc },
         { count: totalKycSubmissions },
       ] = await Promise.all([
@@ -98,6 +96,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           .select(`id, amount, created_at, status, collections!withdrawals_collection_id_fkey(title)`)
           .order("created_at", { ascending: false })
           .limit(10),
+        supabase.from("wallets").select("available_balance, ledger_balance"),
         supabase
           .from("kyc_verifications")
           .select("*", { count: "exact", head: true })
@@ -143,6 +142,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         activeCampaigns: activeCampaigns || 0,
         pendingKyc: pendingKyc || 0,
         totalKycSubmissions: totalKycSubmissions || 0,
+        totalAvailableBalance,
+        totalLedgerBalance,
+        totalPendingBalance,
         collectionsByType,
       };
 
