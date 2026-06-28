@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Progress } from "@/components/ui/progress";
 import { supabase } from '@/integrations/supabase/client';
+import { axiosInstance } from '@/lib/axios';
 
 interface Contributor {
   id: string;
@@ -73,6 +74,11 @@ const CollectionDetailPage = () => {
   const [contributors, setContributors] = useState<Contributor[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [wallet, setWallet] = useState<any>(null);
+  // Live-recomputed wallet snapshot from the backend (GET .../wallet-live).
+  // Reuses the canonical computeWalletBalances() so the settled↔pending split
+  // is correct as of right now, instead of the cached `wallets` columns which
+  // go stale after a settlement window passes with no wallet write.
+  const [liveWallet, setLiveWallet] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -152,6 +158,22 @@ const CollectionDetailPage = () => {
       );
       setWithdrawals(sortedWithdrawals);
 
+      // Live wallet snapshot — additive and best-effort. If the backend is
+      // unreachable we silently keep the cached `wallets` columns (set above),
+      // so this never blocks or breaks the page; it only upgrades the numbers
+      // to a live recomputation when available.
+      try {
+        const { data: live } = await axiosInstance.get(
+          `/adminurlabdkole/collections/${id}/wallet-live`,
+        );
+        if (live && (live.source === 'live' || typeof live.availableBalance === 'number')) {
+          setLiveWallet(live);
+        }
+      } catch (liveErr) {
+        console.warn('Live wallet fetch failed — falling back to cached wallet columns:', liveErr);
+        setLiveWallet(null);
+      }
+
     } catch (error) {
       console.error('Failed to load collection data:', error);
       toast({
@@ -211,16 +233,35 @@ const CollectionDetailPage = () => {
   const contributorCount = paidContributors.length;
   const displayContributorCount = collection.total_contributions > contributorCount ? collection.total_contributions : contributorCount;
 
-  // Financial Stats from Wallet (canonical definitions):
+  // Financial Stats (canonical definitions):
   //   - Total Balance    = ledger_balance    (total raised minus completed withdrawals)
   //   - Available        = available_balance (settled past T+1, withdrawable now)
   //   - Pending          = pending_balance   (received today, settles at 5am WAT next day)
   //   - Total Withdrawn  = withdrawn         (sum of completed withdrawals)
-  const availableBalance = Number(wallet?.available_balance || 0);
-  const pendingBalance = Number(wallet?.pending_balance || 0);
-  const ledgerBalance = Number(wallet?.ledger_balance || (availableBalance + pendingBalance));
+  //
+  // PREFER the live snapshot (recomputed server-side via computeWalletBalances
+  // on this request) so the settled↔pending split is correct even after a
+  // settlement window has passed with no wallet write. Fall back to the cached
+  // `wallets` columns when the live endpoint is unavailable.
+  const usingLiveWallet = !!liveWallet;
+  const availableBalance = usingLiveWallet
+    ? Number(liveWallet.availableBalance || 0)
+    : Number(wallet?.available_balance || 0);
+  const pendingBalance = usingLiveWallet
+    ? Number(liveWallet.pendingBalance || 0)
+    : Number(wallet?.pending_balance || 0);
+  const ledgerBalance = usingLiveWallet
+    ? Number(liveWallet.ledgerBalance || (availableBalance + pendingBalance))
+    : Number(wallet?.ledger_balance || (availableBalance + pendingBalance));
   const totalBalance = ledgerBalance; // "Total Balance" per product definition
-  const totalWithdrawn = Number(wallet?.withdrawn || 0);
+  const totalWithdrawn = usingLiveWallet
+    ? Number(liveWallet.withdrawn || 0)
+    : Number(wallet?.withdrawn || 0);
+  // What the host could actually withdraw right now (available minus open
+  // withdrawal requests). Only available from the live endpoint.
+  const withdrawableBalance = usingLiveWallet
+    ? Number(liveWallet.withdrawableBalance ?? availableBalance)
+    : availableBalance;
 
   // Type determination — use collection_type first (canonical), fall back to type
   const canonicalType = (collection.collection_type || collection.type || 'fixed').toLowerCase();
@@ -662,8 +703,12 @@ const CollectionDetailPage = () => {
                   <span className="font-medium">{formatCurrency(totalBalance)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Available</span>
+                  <span className="text-sm text-muted-foreground">Available (settled)</span>
                   <span className="font-medium text-green-600">{formatCurrency(availableBalance)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Withdrawable now</span>
+                  <span className="font-medium text-green-700">{formatCurrency(withdrawableBalance)}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-muted-foreground">Pending (T+1)</span>
@@ -672,6 +717,11 @@ const CollectionDetailPage = () => {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-muted-foreground">Total Withdrawn</span>
                   <span className="font-medium">{formatCurrency(totalWithdrawn)}</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground pt-1">
+                  {usingLiveWallet
+                    ? 'Live balances (recomputed now, T+1 settlement applied)'
+                    : 'Cached balances — live recompute unavailable'}
                 </div>
 
                 <div className="flex justify-between items-center pt-2">
