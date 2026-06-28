@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { axiosInstance } from "@/lib/axios";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 
 interface UserStats {
@@ -187,15 +188,53 @@ const UserDetailPage = () => {
         );
 
         const accountBalance = ledgerBalance; // Total Balance = available + pending
-        void pendingWithdrawal; void approvedButNotLedgerDeducted; // tracked but not used for balance math
+        void approvedButNotLedgerDeducted; // tracked but not used for balance math
+
+        // Prefer the live, server-recomputed account snapshot. The summed
+        // cached `wallets` columns above over-report whenever a withdrawal was
+        // approved before the recompute-on-approval logic existed (and the
+        // collection has had no activity since) — the cached ledger still holds
+        // money that has already left the wallet. The live endpoint reuses the
+        // exact pooled computeWalletBalances() the host dashboard uses, so admin
+        // and host always agree. Best-effort: fall back to the cached sums if
+        // the backend is unreachable, so the page never breaks.
+        let liveStats: any = null;
+        try {
+          const { data: live } = await axiosInstance.get(
+            `/adminurlabdkole/users/${id}/wallet-live`,
+          );
+          if (live && typeof live.totalBalance === "number") {
+            liveStats = live;
+          }
+        } catch (liveErr) {
+          console.warn(
+            "Live account wallet fetch failed — falling back to cached wallet columns:",
+            liveErr,
+          );
+        }
 
         setStats({
-          availableBalance,
-          accountBalance,
-          totalWithdrawn,
-          pendingWithdrawal,
-          pendingBalance,
-          totalRaised: netPayment,
+          availableBalance: liveStats
+            ? Number(liveStats.availableBalance || 0)
+            : availableBalance,
+          accountBalance: liveStats
+            ? Number(liveStats.totalBalance || 0)
+            : accountBalance,
+          // `withdrawn` from the live endpoint is the canonical completed-
+          // withdrawals figure (computeWalletBalances); keep the existing
+          // client tally as the fallback.
+          totalWithdrawn: liveStats
+            ? Number(liveStats.withdrawn ?? totalWithdrawn)
+            : totalWithdrawn,
+          pendingWithdrawal: liveStats
+            ? Number(liveStats.pendingWithdrawalRequests ?? pendingWithdrawal)
+            : pendingWithdrawal,
+          pendingBalance: liveStats
+            ? Number(liveStats.pendingBalance || 0)
+            : pendingBalance,
+          totalRaised: liveStats
+            ? Number(liveStats.totalRaised || 0)
+            : netPayment,
         });
 
         // 4. Generate Activity Log
