@@ -1,5 +1,5 @@
 import axios from "axios";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuthStore } from "@/stores/authStore";
 
 // Resolve the API base URL.
 //
@@ -30,17 +30,26 @@ export const axiosInstance = axios.create({
   withCredentials: true,
 });
 
-// Add a request interceptor to always use the latest token
+// Add a request interceptor to always use the latest token.
+//
+// This reads the token synchronously from the auth store instead of calling
+// supabase.auth.getSession() on every request. getSession() serializes
+// behind Supabase's cross-tab auth lock (the Web Locks API) — if that lock
+// is ever left held (a known supabase-js failure mode under concurrent
+// calls), every future getSession() call hangs forever. Because an SPA
+// never tears down the page on client-side navigation, a hang triggered by
+// one request stays stuck and silently blocks every subsequent request —
+// which is what made affected pages look frozen until a full reload (a
+// reload destroys the document, which releases the held Web Lock).
+//
+// The auth store's `session` is kept current via the onAuthStateChange
+// listener set up in authStore's initialize() (including TOKEN_REFRESHED),
+// so reading it here is just as up to date without the lock risk.
 axiosInstance.interceptors.request.use(
-  async (config) => {
-    // Ask Supabase for the active session instead of parsing its private
-    // local-storage representation. getSession() also refreshes an expired
-    // access token when possible, so approval requests do not leave with a
-    // stale JWT after the admin panel has been open for a while.
-    const { data, error } = await supabase.auth.getSession();
-    const accessToken = data.session?.access_token;
+  (config) => {
+    const accessToken = useAuthStore.getState().session?.access_token;
 
-    if (!error && accessToken) {
+    if (accessToken) {
       config.headers.Authorization = `Bearer ${accessToken}`;
     } else {
       delete config.headers.Authorization;

@@ -1,13 +1,15 @@
 
 import { useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 export const AdminLayout = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user = {}, loading, initialized, initialize } = useAuthStore();
 
   useEffect(() => {
@@ -45,7 +47,9 @@ export const AdminLayout = () => {
       <div className="flex flex-col flex-1 overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50">
-          <Outlet />
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
