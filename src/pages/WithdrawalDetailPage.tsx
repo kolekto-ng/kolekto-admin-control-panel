@@ -53,7 +53,7 @@ const WithdrawalDetailPage = () => {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to approve withdrawal request.',
+        description: error instanceof Error ? error.message : 'Failed to approve withdrawal request.',
         variant: 'destructive',
       });
     } finally {
@@ -74,7 +74,7 @@ const WithdrawalDetailPage = () => {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to reject withdrawal request.',
+        description: error instanceof Error ? error.message : 'Failed to reject withdrawal request.',
         variant: 'destructive',
       });
     } finally {

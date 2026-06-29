@@ -1,11 +1,25 @@
 import axios from "axios";
+import { useAuthStore } from "@/stores/authStore";
 
-let baseURL = "http://localhost:5050/api";
-if (import.meta.env.MODE === "production") {
-  baseURL = import.meta.env.VITE_API_URL;
-  console.log("Running in production");
-} else {
-  console.log("Running in development");
+// Resolve the API base URL.
+//
+// Previously this hardcoded `http://localhost:5000/api` for dev mode, but the
+// backend listens on port 5050 (see kolekto-be-old/app.js — `PORT || 5050`).
+// That mismatch meant every admin→backend call in local dev would fail with
+// "Network Error" and the FE would render "Could not reach the backend."
+//
+// Rules:
+//   - If VITE_API_URL is set in env (any mode), use it. This lets local devs
+//     point at staging/prod from .env without code changes.
+//   - Otherwise fall back to localhost:5050 (matches the backend default).
+const envApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const baseURL = envApiUrl && envApiUrl.length > 0
+  ? envApiUrl
+  : "http://localhost:5050/api";
+
+if (import.meta.env.MODE !== "production") {
+  // eslint-disable-next-line no-console
+  console.log(`[admin axios] baseURL = ${baseURL} (mode=${import.meta.env.MODE})`);
 }
 
 export const axiosInstance = axios.create({
@@ -16,23 +30,29 @@ export const axiosInstance = axios.create({
   withCredentials: true,
 });
 
-// Add a request interceptor to always use the latest token
+// Add a request interceptor to always use the latest token.
+//
+// This reads the token synchronously from the auth store instead of calling
+// supabase.auth.getSession() on every request. getSession() serializes
+// behind Supabase's cross-tab auth lock (the Web Locks API) — if that lock
+// is ever left held (a known supabase-js failure mode under concurrent
+// calls), every future getSession() call hangs forever. Because an SPA
+// never tears down the page on client-side navigation, a hang triggered by
+// one request stays stuck and silently blocks every subsequent request —
+// which is what made affected pages look frozen until a full reload (a
+// reload destroys the document, which releases the held Web Lock).
+//
+// The auth store's `session` is kept current via the onAuthStateChange
+// listener set up in authStore's initialize() (including TOKEN_REFRESHED),
+// so reading it here is just as up to date without the lock risk.
 axiosInstance.interceptors.request.use(
   (config) => {
-    let token = localStorage.getItem("kolekto-auth-token");
-    console.log(token)
-    if (token) {
-      try {
-        token = JSON.parse(token);
-        if (token && token.access_token) {
-          config.headers.Authorization = `Bearer ${token.access_token}`;
-        }
-      } catch (e) {
-        // Invalid token in storage
-        config.headers.Authorization = undefined;
-      }
+    const accessToken = useAuthStore.getState().session?.access_token;
+
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     } else {
-      config.headers.Authorization = undefined;
+      delete config.headers.Authorization;
     }
     return config;
   },

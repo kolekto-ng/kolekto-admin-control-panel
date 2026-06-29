@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
 import { axiosInstance } from "../lib/axios";
-import { log } from "console";
 
 export interface Withdrawal {
   id: string;
@@ -171,6 +170,11 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
             ? { ...withdrawal, status: "approved" as const }
             : withdrawal
         ),
+        selectedWithdrawal:
+          state.selectedWithdrawal?.id === id
+            ? { ...state.selectedWithdrawal, status: "approved" as const }
+            : state.selectedWithdrawal,
+        error: null,
       }));
     } catch (apiError: any) {
       const status = apiError?.response?.status;
@@ -207,6 +211,11 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
             ? { ...withdrawal, status: "rejected" as const }
             : withdrawal
         ),
+        selectedWithdrawal:
+          state.selectedWithdrawal?.id === id
+            ? { ...state.selectedWithdrawal, status: "rejected" as const }
+            : state.selectedWithdrawal,
+        error: null,
       }));
     } catch (apiError: any) {
       const status = apiError?.response?.status;
