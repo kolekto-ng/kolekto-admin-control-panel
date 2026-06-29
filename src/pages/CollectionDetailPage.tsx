@@ -233,11 +233,7 @@ const CollectionDetailPage = () => {
   const contributorCount = paidContributors.length;
   const displayContributorCount = collection.total_contributions > contributorCount ? collection.total_contributions : contributorCount;
 
-<<<<<<< HEAD
-  // Financial Stats from Wallet (canonical definitions):
-=======
   // Financial Stats (canonical definitions):
->>>>>>> ghazali/fix-with-claude
   //   - Total Balance    = ledger_balance    (total raised minus completed withdrawals)
   //   - Available        = available_balance (settled past T+1, withdrawable now)
   //   - Pending          = pending_balance   (received today, settles at 5am WAT next day)
