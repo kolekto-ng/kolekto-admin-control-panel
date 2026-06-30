@@ -30,6 +30,7 @@ const ReconcilePaymentPage = () => {
   const { toast } = useToast();
   const [reference, setReference] = useState("");
   const [collectionId, setCollectionId] = useState("");
+  const [selectedTierId, setSelectedTierId] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ReconcileResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +48,13 @@ const ReconcilePaymentPage = () => {
 
     try {
       const cid = collectionId.trim();
+      const tid = selectedTierId.trim();
+      const payload: Record<string, string> = { reference: ref };
+      if (cid) payload.collectionId = cid;
+      if (tid) payload.selectedTierId = tid;
       const { data } = await axiosInstance.post<ReconcileResult>(
         "/adminurlabdkole/reconcile-payment",
-        cid ? { reference: ref, collectionId: cid } : { reference: ref }
+        payload
       );
       setResult(data);
       toast({
@@ -153,6 +158,27 @@ const ReconcilePaymentPage = () => {
                 "Missing collection ID in payment metadata" — confirm the right
                 collection on Paystack (by the contributor's email/amount/time) before
                 pasting its ID here.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="selectedTierId">Pricing tier ID (optional)</Label>
+              <Input
+                id="selectedTierId"
+                value={selectedTierId}
+                onChange={(e) => setSelectedTierId(e.target.value)}
+                placeholder="Only needed if reconciliation says the tier is ambiguous"
+                disabled={loading}
+                className="font-mono"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave blank normally — for "tiered" collections, the tier is auto-detected
+                from the amount the contributor paid. Only fill this in if reconciliation
+                fails with "Select a valid pricing tier" AND mentions more than one tier
+                matches that amount; find the tier's ID in the collection's pricing setup.
               </p>
             </div>
 
