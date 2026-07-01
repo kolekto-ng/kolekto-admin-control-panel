@@ -49,8 +49,12 @@ interface DashboardData {
     avgRecoveryMs: number | null;
     mttrMs: number | null;
     awaitingRecovery: number;
+    /** Total payments with no contribution yet, any age — the true in-flight count. */
+    awaitingContribution: number;
     nextSweepInSeconds: number;
     successRateBySource: Record<string, number | null>;
+    /** ISO timestamp from the server at the time data was fetched. */
+    serverNow?: string;
   };
   categories: Record<string, PaymentItem[]>;
 }
@@ -76,10 +80,11 @@ const CATEGORY_BADGE: Record<string, { label: string; className: string }> = {
 };
 
 const TABS: Array<{ key: string; label: string }> = [
+  { key: "awaiting", label: "Awaiting Contribution" },
   { key: "all", label: "All" },
   { key: "orphaned", label: "Orphaned" },
   { key: "failed", label: "Failed" },
-  { key: "pending", label: "Pending" },
+  { key: "pending", label: "In Progress (<5m)" },
   { key: "recovered", label: "Recovered" },
   { key: "successful", label: "Successful" },
 ];
@@ -104,6 +109,8 @@ const PaymentMonitoringPage = () => {
   const [retryingAll, setRetryingAll] = useState(false);
   const [nextSweepCountdown, setNextSweepCountdown] = useState<number | null>(null);
   const [backendUnavailable, setBackendUnavailable] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+  const [secondsSinceRefresh, setSecondsSinceRefresh] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,6 +119,8 @@ const PaymentMonitoringPage = () => {
       const { data: result } = await axiosInstance.get<DashboardData>("/adminurlabdkole/payment-monitoring");
       setData(result);
       setNextSweepCountdown(result.stats.nextSweepInSeconds);
+      setLastRefreshedAt(new Date());
+      setSecondsSinceRefresh(0);
     } catch (err: any) {
       // ERR_NETWORK / ERR_CONNECTION_REFUSED = backend not running.
       // Show a targeted "server offline" UI rather than a generic error toast
@@ -134,6 +143,33 @@ const PaymentMonitoringPage = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Auto-refresh every 30 seconds so new payments initiated after the admin
+  // opened the page appear without manual intervention. This is the primary
+  // fix for "initiated payments not appearing instantly" — the dashboard is
+  // no longer a static snapshot. 30s is short enough to catch a Paystack
+  // bank transfer that confirmed in < 1 minute, but cheap enough (~2 extra
+  // API calls/minute per admin session) to run continuously.
+  useEffect(() => {
+    const AUTO_REFRESH_MS = 30_000;
+    const interval = setInterval(() => {
+      // Only auto-refresh if the page is visible — avoids unnecessary work
+      // when an admin leaves the tab open in the background.
+      if (document.visibilityState === "visible") {
+        load();
+      }
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  // Ticks the "updated Ns ago" counter every second using the client clock.
+  useEffect(() => {
+    if (!lastRefreshedAt) return;
+    const interval = setInterval(() => {
+      setSecondsSinceRefresh(Math.floor((Date.now() - lastRefreshedAt.getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lastRefreshedAt]);
 
   // Live countdown to the next sweep run, ticking client-side between
   // refreshes (the sweep runs server-side on its own pg_cron schedule
@@ -199,10 +235,17 @@ const PaymentMonitoringPage = () => {
             Every payment Paystack confirmed, what happened to it, and what to do about the ones that didn't make it through cleanly.
           </p>
         </div>
-        <Button variant="outline" onClick={load} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          {lastRefreshedAt && !loading && (
+            <span className="text-xs text-muted-foreground tabular-nums">
+              Updated {secondsSinceRefresh < 5 ? "just now" : `${secondsSinceRefresh}s ago`}
+            </span>
+          )}
+          <Button variant="outline" onClick={load} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {backendUnavailable && (
@@ -228,24 +271,39 @@ const PaymentMonitoringPage = () => {
 
       {data && (
         <>
-          {/* Always-on operational pulse: how many payments the next sweep
-              will act on, and when that next run happens. Shown whether or
-              not anything's currently wrong — "0 awaiting, next in 3m" is
-              itself the reassurance that the safety net is alive. */}
-          <Card className={data.stats.awaitingRecovery > 0 ? "border-amber-300 bg-amber-50" : "border-green-200 bg-green-50"}>
-            <CardContent className="py-4 flex items-center justify-between flex-wrap gap-2">
+          {/* Operational pulse: true in-flight count (awaitingContribution)
+              is the primary signal — it counts ALL payments with no
+              contribution yet, any age. awaitingRecovery (≥5 min only)
+              is the subset the scheduled sweep will act on next.
+              Distinguishing the two lets admins see fresh missed payments
+              (< 5 min, callback hasn't fired) alongside older orphaned ones
+              without waiting for the sweep threshold to pass.
+              "0 awaiting" across both = every initiated payment has a
+              contribution — the system is fully healthy. */}
+          <Card className={
+            data.stats.awaitingContribution > 0
+              ? "border-amber-300 bg-amber-50"
+              : "border-green-200 bg-green-50"
+          }>
+            <CardContent className="py-4 flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-2 text-sm">
-                {data.stats.awaitingRecovery > 0 ? (
+                {data.stats.awaitingContribution > 0 ? (
                   <>
-                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
                     <span>
-                      ⚠️ Payments awaiting automatic recovery: <strong>{data.stats.awaitingRecovery}</strong>
+                      <strong>{data.stats.awaitingContribution}</strong>{" "}
+                      payment{data.stats.awaitingContribution !== 1 ? "s" : ""} awaiting contribution
+                      {data.stats.awaitingRecovery > 0 && (
+                        <span className="text-muted-foreground ml-1 text-xs">
+                          ({data.stats.awaitingRecovery} eligible for sweep)
+                        </span>
+                      )}
                     </span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    <span>No payments awaiting recovery right now</span>
+                    <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+                    <span>All initiated payments have a recorded contribution</span>
                   </>
                 )}
               </div>
@@ -259,8 +317,15 @@ const PaymentMonitoringPage = () => {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <StatsCard title="Successful Today" value={String(data.stats.successfulToday)} icon="check" variant="success" description="Clean, no recovery needed" />
             <StatsCard title="Recovered Today" value={String(data.stats.recoveredToday)} icon="check" variant="default" description="Sweep / webhook / admin" />
-            <StatsCard title="Pending Verification" value={String(data.stats.pendingVerification)} icon="clock" variant="warning" description="< 5 minutes old" />
-            <StatsCard title="Orphaned" value={String(data.stats.orphaned)} icon="alert-circle" variant="danger" notification={data.stats.orphaned > 0} description="Needs attention" />
+            <StatsCard
+              title="In Progress"
+              value={String(data.stats.pendingVerification)}
+              icon="clock"
+              variant={data.stats.pendingVerification > 0 ? "warning" : "default"}
+              notification={data.stats.pendingVerification > 0}
+              description="Initiated < 5m ago, callback/webhook expected"
+            />
+            <StatsCard title="Orphaned" value={String(data.stats.orphaned)} icon="alert-circle" variant="danger" notification={data.stats.orphaned > 0} description="≥5m, sweep will recover" />
             <StatsCard title="Failed Recoveries" value={String(data.stats.failedRecoveries)} icon="alert-circle" variant="danger" notification={data.stats.failedRecoveries > 0} description="Retrying every 5 min" />
           </div>
 
@@ -307,7 +372,7 @@ const PaymentMonitoringPage = () => {
             <CardTitle>Payments</CardTitle>
             <CardDescription>Last 7 days</CardDescription>
           </div>
-          {activeTab === "failed" && items.length > 0 && (
+          {(activeTab === "failed" || (activeTab === "awaiting" && (data?.categories?.failed?.length ?? 0) > 0)) && items.length > 0 && (
             <Button size="sm" onClick={handleRetryAll} disabled={retryingAll}>
               {retryingAll ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
               Retry All Failed
@@ -370,7 +435,9 @@ const PaymentMonitoringPage = () => {
                               <Eye className="h-3.5 w-3.5" />
                             </Link>
                           </Button>
-                          {(item.category === "orphaned" || item.category === "failed") && (
+                          {/* Retry is idempotent: if Paystack hasn't confirmed yet
+                              it returns without creating anything — safe at any age. */}
+                          {(item.category === "orphaned" || item.category === "failed" || item.category === "pending") && (
                             <Button
                               size="sm"
                               variant="ghost"

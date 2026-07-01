@@ -19,7 +19,11 @@ const baseURL = envApiUrl && envApiUrl.length > 0
 
 if (import.meta.env.MODE !== "production") {
   // eslint-disable-next-line no-console
-  console.log(`[admin axios] baseURL = ${baseURL} (mode=${import.meta.env.MODE})`);
+  console.log(
+    `[admin axios] baseURL = ${baseURL}` +
+    ` | mode = ${import.meta.env.MODE}` +
+    ` | VITE_API_URL env = ${import.meta.env.VITE_API_URL ?? "(not set — using fallback)"}`,
+  );
 }
 
 export const axiosInstance = axios.create({
@@ -29,6 +33,18 @@ export const axiosInstance = axios.create({
   },
   withCredentials: true,
 });
+
+// Diagnostic interceptor — dev/test only. Logs the exact URL that will be
+// sent so that URL-base misconfiguration is visible immediately in DevTools.
+if (import.meta.env.MODE !== "production") {
+  axiosInstance.interceptors.request.use((config) => {
+    const method = (config.method ?? "GET").toUpperCase();
+    const full = (config.baseURL ?? "") + (config.url ?? "");
+    // eslint-disable-next-line no-console
+    console.log(`[admin axios] → ${method} ${full}`);
+    return config;
+  });
+}
 
 // Add a request interceptor to always use the latest token.
 //
