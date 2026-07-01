@@ -22,4 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Environment files — all variants with real credentials are gitignored.
+# Only .env.example is committed (no real values).
+# Run `vite --mode test` or `vite --mode production` to select environment.
 .env
+.env.test
+.env.production

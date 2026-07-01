@@ -23,6 +23,8 @@ import FundraisingPage from "./pages/FundraisingPage";
 import FundraisingDetailPage from "./pages/FundraisingDetailPage";
 import KYCDetailPage from "./pages/KYCDetailPage";
 import ReconcilePaymentPage from "./pages/ReconcilePaymentPage";
+import PaymentMonitoringPage from "./pages/PaymentMonitoringPage";
+import PaymentMonitoringDetailPage from "./pages/PaymentMonitoringDetailPage";
 
 const queryClient = new QueryClient();
 
@@ -51,6 +53,8 @@ const App = () => (
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="reconcile" element={<ReconcilePaymentPage />} />
+            <Route path="payment-monitoring" element={<PaymentMonitoringPage />} />
+            <Route path="payment-monitoring/:reference" element={<PaymentMonitoringDetailPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
