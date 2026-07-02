@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
 import { axiosInstance } from "../lib/axios";
-import { log } from "console";
 
 export interface Withdrawal {
   id: string;
@@ -66,9 +65,7 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
       if (error) {
         throw error;
       }
-
       const items = withdrawalsData || [];
-
       const formattedWithdrawals: Withdrawal[] = items.map((w: any) => {
         const profile = w.collections?.profiles;
         return {
@@ -99,7 +96,6 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
       });
     }
   },
-
   fetchWithdrawalById: async (id: string) => {
     set({ detailLoading: true, error: null });
     try {
@@ -174,6 +170,11 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
             ? { ...withdrawal, status: "approved" as const }
             : withdrawal
         ),
+        selectedWithdrawal:
+          state.selectedWithdrawal?.id === id
+            ? { ...state.selectedWithdrawal, status: "approved" as const }
+            : state.selectedWithdrawal,
+        error: null,
       }));
     } catch (apiError: any) {
       const status = apiError?.response?.status;
@@ -210,6 +211,11 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
             ? { ...withdrawal, status: "rejected" as const }
             : withdrawal
         ),
+        selectedWithdrawal:
+          state.selectedWithdrawal?.id === id
+            ? { ...state.selectedWithdrawal, status: "rejected" as const }
+            : state.selectedWithdrawal,
+        error: null,
       }));
     } catch (apiError: any) {
       const status = apiError?.response?.status;

@@ -14,6 +14,9 @@ export interface DashboardStats {
   activeCampaigns: number;
   pendingKyc: number;
   totalKycSubmissions: number;
+  totalAvailableBalance: number;
+  totalLedgerBalance: number;
+  totalPendingBalance: number;
   // Collection type breakdown
   collectionsByType: Record<string, number>;
 }
@@ -59,6 +62,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         { data: collectionTypeData },
         { data: recentContributions },
         { data: recentWithdrawals },
+        { data: walletsData },
         { count: pendingKyc },
         { count: totalKycSubmissions },
       ] = await Promise.all([
@@ -92,6 +96,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           .select(`id, amount, created_at, status, collections!withdrawals_collection_id_fkey(title)`)
           .order("created_at", { ascending: false })
           .limit(10),
+        supabase.from("wallets").select("available_balance, ledger_balance"),
         supabase
           .from("kyc_verifications")
           .select("*", { count: "exact", head: true })
@@ -114,9 +119,15 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       // Build collection type breakdown
       const collectionsByType: Record<string, number> = {};
       (collectionTypeData || []).forEach((c: any) => {
-        const ct = c.collection_type || c.type || "fixed";
+        const ct = (c.collection_type && c.collection_type !== 'fixed')
+          ? c.collection_type
+          : (c.type || "fixed");
         collectionsByType[ct] = (collectionsByType[ct] || 0) + 1;
       });
+
+      const totalAvailableBalance = walletsData?.reduce((sum, w) => sum + (w.available_balance || 0), 0) || 0;
+      const totalLedgerBalance = walletsData?.reduce((sum, w) => sum + (w.ledger_balance || 0), 0) || 0;
+      const totalPendingBalance = Math.max(0, totalLedgerBalance - totalAvailableBalance);
 
       const stats: DashboardStats = {
         totalUsers: totalUsers || 0,
@@ -131,6 +142,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         activeCampaigns: activeCampaigns || 0,
         pendingKyc: pendingKyc || 0,
         totalKycSubmissions: totalKycSubmissions || 0,
+        totalAvailableBalance,
+        totalLedgerBalance,
+        totalPendingBalance,
         collectionsByType,
       };
 

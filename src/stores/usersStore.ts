@@ -36,16 +36,7 @@ export const useUsersStore = create<UsersState>((set, get) => ({
       // Fetch profiles with nested collections and KYC status (single consolidated query, limited columns)
       const { data: profilesData, error } = await supabase
         .from("profiles")
-        .select(`
-          id,
-          full_name,
-          email,
-          phone_number,
-          created_at,
-          date_of_birth,
-          collections(id),
-          kyc_verifications(status)
-        `)
+        .select("*, collections(*, wallets(net_payment))")
         .order("created_at", { ascending: false });
 
       if (error) throw error;

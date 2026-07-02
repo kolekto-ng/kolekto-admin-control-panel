@@ -146,6 +146,28 @@ const Dashboard = () => {
               variant={stats.pendingKyc > 0 ? "warning" : undefined}
               notification={stats.pendingKyc > 0}
             />
+
+            <StatsCard
+              title="Total Available Balance"
+              value={formatCurrency(stats.totalLedgerBalance)}
+              description="Platform-wide ledger balance"
+              icon="wallet"
+              variant="default"
+            />
+            <StatsCard
+              title="Total Available for Withdrawal"
+              value={formatCurrency(stats.totalAvailableBalance)}
+              description="Settled and ready to withdraw"
+              icon="check"
+              variant="success"
+            />
+            <StatsCard
+              title="Total Pending for Withdrawal"
+              value={formatCurrency(stats.totalPendingBalance)}
+              description="Funds in T+1 settlement"
+              icon="clock"
+              variant="warning"
+            />
           </>
         ) : (
           <p>Failed to load stats data</p>

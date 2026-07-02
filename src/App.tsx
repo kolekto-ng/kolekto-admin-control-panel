@@ -25,6 +25,8 @@ import KYCDetailPage from "./pages/KYCDetailPage";
 import ReconcilePaymentPage from "./pages/ReconcilePaymentPage";
 import AmbassadorApplicationsPage from "./pages/AmbassadorApplicationsPage";
 import AmbassadorDetailPage from "./pages/AmbassadorDetailPage";
+import PaymentMonitoringPage from "./pages/PaymentMonitoringPage";
+import PaymentMonitoringDetailPage from "./pages/PaymentMonitoringDetailPage";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +57,8 @@ const App = () => (
             <Route path="ambassadors/:id" element={<AmbassadorDetailPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="reconcile" element={<ReconcilePaymentPage />} />
+            <Route path="payment-monitoring" element={<PaymentMonitoringPage />} />
+            <Route path="payment-monitoring/:reference" element={<PaymentMonitoringDetailPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

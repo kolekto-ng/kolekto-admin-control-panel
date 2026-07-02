@@ -15,6 +15,7 @@ import {
   Heart,
   Wrench,
   Award,
+  ActivitySquare,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -98,6 +99,11 @@ export const Sidebar = () => {
       name: 'Reconcile',
       icon: Wrench,
       path: '/reconcile',
+    },
+    {
+      name: 'Payment Monitoring',
+      icon: ActivitySquare,
+      path: '/payment-monitoring',
     },
     {
       name: 'Settings',
