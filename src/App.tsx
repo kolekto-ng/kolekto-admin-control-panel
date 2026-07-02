@@ -1,4 +1,3 @@
-
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -53,12 +52,21 @@ const App = () => (
             <Route path="kyc" element={<AdminKYCDashboard />} />
             <Route path="kyc/:userId" element={<KYCDetailPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
-            <Route path="ambassadors" element={<AmbassadorApplicationsPage />} />
+            <Route
+              path="ambassadors"
+              element={<AmbassadorApplicationsPage />}
+            />
             <Route path="ambassadors/:id" element={<AmbassadorDetailPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="reconcile" element={<ReconcilePaymentPage />} />
-            <Route path="payment-monitoring" element={<PaymentMonitoringPage />} />
-            <Route path="payment-monitoring/:reference" element={<PaymentMonitoringDetailPage />} />
+            <Route
+              path="payment-monitoring"
+              element={<PaymentMonitoringPage />}
+            />
+            <Route
+              path="payment-monitoring/:reference"
+              element={<PaymentMonitoringDetailPage />}
+            />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
