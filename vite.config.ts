@@ -47,5 +47,43 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "./src"),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Route-level code splitting (see App.tsx's React.lazy() imports)
+          // already keeps each page's own code out of the initial bundle.
+          // These vendor groups exist for what route-splitting alone can't
+          // fix: large third-party packages shared across many routes would
+          // otherwise get duplicated into every page chunk that imports
+          // them. Grouping them once also means they're cached by the
+          // browser independent of app-code deploys (they change far less
+          // often than our own pages).
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return undefined;
+            if (/node_modules\/(react|react-dom|react-router-dom|scheduler)\//.test(id)) {
+              return "vendor-react";
+            }
+            if (id.includes("node_modules/@supabase")) {
+              return "vendor-supabase";
+            }
+            if (id.includes("node_modules/@tanstack")) {
+              return "vendor-query";
+            }
+            // recharts is only actually used by AmbassadorDetailPage today
+            // (see src/components/ui/chart.tsx, currently unused elsewhere)
+            // — route-splitting alone already keeps it out of every other
+            // page's chunk. This just gives it a stable, cacheable name
+            // instead of being inlined into that one page chunk.
+            if (id.includes("node_modules/recharts") || id.includes("node_modules/d3-")) {
+              return "vendor-charts";
+            }
+            if (id.includes("node_modules/@radix-ui")) {
+              return "vendor-radix";
+            }
+            return undefined;
+          },
+        },
+      },
+    },
   };
 });
