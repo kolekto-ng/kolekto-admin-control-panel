@@ -13,9 +13,10 @@ import { useAuthStore } from "@/stores/authStore";
 //     point at staging/prod from .env without code changes.
 //   - Otherwise fall back to localhost:5050 (matches the backend default).
 const envApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+// Fallback matches the backend's own default (kolekto-be-old/.env: PORT=3000).
 const baseURL = envApiUrl && envApiUrl.length > 0
   ? envApiUrl
-  : "http://localhost:5050/api";
+  : "http://localhost:3000/api";
 
 if (import.meta.env.MODE !== "production") {
   // eslint-disable-next-line no-console
@@ -28,6 +29,7 @@ if (import.meta.env.MODE !== "production") {
 
 export const axiosInstance = axios.create({
   baseURL,
+  timeout: 15_000, // 15 s — fail fast instead of hanging when backend is down
   headers: {
     "Content-Type": "application/json",
   },

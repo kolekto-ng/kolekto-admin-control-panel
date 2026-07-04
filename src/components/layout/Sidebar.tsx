@@ -23,6 +23,7 @@ export const Sidebar = () => {
   const [pendingFundraisers, setPendingFundraisers] = useState(0);
   const [pendingWithdrawals, setPendingWithdrawals] = useState(0);
   const [pendingKyc, setPendingKyc] = useState(0);
+  const [pendingAmbassadorWithdrawals, setPendingAmbassadorWithdrawals] = useState(0);
 
   useEffect(() => {
     const fetchBadgeCounts = async () => {
@@ -30,6 +31,7 @@ export const Sidebar = () => {
         { count: fundraiserCount },
         { count: withdrawalCount },
         { count: kycCount },
+        { count: ambassadorWithdrawalCount },
       ] = await Promise.all([
         supabase
           .from("campaigns")
@@ -43,10 +45,15 @@ export const Sidebar = () => {
           .from("kyc_verifications")
           .select("*", { count: "exact", head: true })
           .eq("status", "pending"),
+        supabase
+          .from("ambassador_withdrawals")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "pending"),
       ]);
       setPendingFundraisers(fundraiserCount || 0);
       setPendingWithdrawals(withdrawalCount || 0);
       setPendingKyc(kycCount || 0);
+      setPendingAmbassadorWithdrawals(ambassadorWithdrawalCount || 0);
     };
     fetchBadgeCounts();
   }, []);
@@ -90,6 +97,13 @@ export const Sidebar = () => {
       name: "Ambassadors",
       icon: Award,
       path: "/ambassadors",
+    },
+    {
+      name: "Amb. Payouts",
+      icon: Wallet,
+      path: "/ambassador-withdrawals",
+      badge: pendingAmbassadorWithdrawals > 0 ? pendingAmbassadorWithdrawals : undefined,
+      badgeColor: "bg-green-600",
     },
     {
       name: "KYC",

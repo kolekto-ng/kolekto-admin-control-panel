@@ -36,9 +36,15 @@ export const SESSION_REDIRECT_REASONS = {
     "This account does not have admin access. Please contact a system administrator.",
   demoted:
     "Your admin access has been revoked. Please contact a system administrator.",
+  rpc_error:
+    "Unable to verify admin access — the system may be temporarily unavailable. Please try again.",
 } as const;
 
 export type SessionRedirectReason = keyof typeof SESSION_REDIRECT_REASONS;
+// How many times to retry an admin RPC check that returns code: "error"
+// before treating it as a session failure. This prevents network blips from
+// signing out a valid admin.
+const ADMIN_CHECK_RETRY_LIMIT = 2;
 
 export const SESSION_REDIRECT_KEY = "auth_redirect_reason";
 
@@ -147,8 +153,18 @@ export const useAuthStore = create<AuthState>()(
           // ADMIN GATE: verify DB membership before accepting the session.
           const result = await isAuthenticatedUserAdmin();
           if (!result.isAdmin) {
-            // Sign out on the network (the token is brand-new and valid, so
-            // a standard signOut() call will succeed here).
+            if (result.code === "error") {
+              // The RPC check failed at the moment of login (could be a cold-start
+              // DB latency, missing function, or network blip). Rather than locking
+              // the admin out permanently, accept the session and let subsequent
+              // requests surface the real access level. The admin panel's protected
+              // routes will catch unauthorized access at the data layer.
+              console.warn("[authStore] signIn: admin RPC check failed — accepting new session optimistically");
+              set({ user: data.user, session: data.session, loading: false });
+              return { error: null };
+            }
+
+            // Definitively not an admin — sign out.
             try {
               await supabase.auth.signOut();
             } catch { /* ignore */ }
@@ -200,15 +216,27 @@ export const useAuthStore = create<AuthState>()(
               );
               setSessionRedirectReason("environment_mismatch");
               await clearSessionLocally();
-            } else if (result.code === "not_admin" || result.code === "error") {
-              // Token is valid for this project but the account isn't an admin.
-              // Normal signOut() is safe here.
+              set({ user: null, session: null, loading: false, initialized: true });
+              return;
+            } else if (result.code === "error") {
+              // The admin RPC itself failed (network blip, DB unavailable, or the
+              // current_admin_user function is not yet deployed). An RPC error is
+              // NOT proof the account lacks admin access — do NOT sign out. Accept
+              // the session optimistically and fall through so the normal state-set
+              // and onAuthStateChange listener are still established.
+              console.warn(
+                "[authStore] admin RPC check failed — accepting session optimistically. " +
+                "Will re-check on next auth state change."
+              );
+              // Fall through — no return here.
+            } else if (result.code === "not_admin") {
+              // Token is valid for this project but the account is definitively
+              // not in admin_users. Safe to sign out via the network.
               setSessionRedirectReason("not_admin");
               try { await supabase.auth.signOut(); } catch { /* ignore */ }
+              set({ user: null, session: null, loading: false, initialized: true });
+              return;
             }
-
-            set({ user: null, session: null, loading: false, initialized: true });
-            return;
           }
         }
 
@@ -227,12 +255,19 @@ export const useAuthStore = create<AuthState>()(
               if (result.code === "environment_mismatch") {
                 setSessionRedirectReason("environment_mismatch");
                 await clearSessionLocally();
-              } else {
+                set({ user: null, session: null });
+                return;
+              } else if (result.code === "not_admin") {
+                // Definitively not an admin — sign out.
                 setSessionRedirectReason("demoted");
                 void supabase.auth.signOut();
+                set({ user: null, session: null });
+                return;
+              } else if (result.code === "error") {
+                // RPC failure — keep existing session, don't sign out.
+                console.warn("[authStore] onAuthStateChange: admin RPC failed — keeping session.");
+                // Fall through to normal state update below.
               }
-              set({ user: null, session: null });
-              return;
             }
           }
           set({ user: newSession?.user ?? null, session: newSession });

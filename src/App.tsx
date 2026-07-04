@@ -24,6 +24,7 @@ import KYCDetailPage from "./pages/KYCDetailPage";
 import ReconcilePaymentPage from "./pages/ReconcilePaymentPage";
 import AmbassadorApplicationsPage from "./pages/AmbassadorApplicationsPage";
 import AmbassadorDetailPage from "./pages/AmbassadorDetailPage";
+import AmbassadorWithdrawalsPage from "./pages/AmbassadorWithdrawalsPage";
 import PaymentMonitoringPage from "./pages/PaymentMonitoringPage";
 import PaymentMonitoringDetailPage from "./pages/PaymentMonitoringDetailPage";
 
@@ -57,6 +58,7 @@ const App = () => (
               element={<AmbassadorApplicationsPage />}
             />
             <Route path="ambassadors/:id" element={<AmbassadorDetailPage />} />
+            <Route path="ambassador-withdrawals" element={<AmbassadorWithdrawalsPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="reconcile" element={<ReconcilePaymentPage />} />
             <Route

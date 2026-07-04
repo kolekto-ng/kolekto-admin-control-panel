@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import type React from "react";
 import { Link, useParams } from "react-router-dom";
@@ -6,6 +7,7 @@ import {
   Banknote,
   BarChart3,
   CircleDollarSign,
+  ExternalLink,
   Loader2,
   ShieldCheck,
   UserRound,
@@ -17,6 +19,7 @@ import { axiosInstance } from "@/lib/axios";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 
@@ -33,11 +36,12 @@ export default function AmbassadorDetailPage() {
   const { id } = useParams();
   const [detail, setDetail] = useState<AmbassadorDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linking, setLinking] = useState(false);
 
-  useEffect(() => {
+  const loadDetail = () => {
     if (!id) return;
-
-    setLoading(true);
     axiosInstance
       .get(`/adminurlabdkole/ambassadors/applications/${id}/detail`)
       .then(({ data }) => setDetail(data))
@@ -45,7 +49,45 @@ export default function AmbassadorDetailPage() {
         toast.error(error?.response?.data?.error || "Failed to load ambassador detail");
       })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    loadDetail();
   }, [id]);
+
+  async function handleLinkOrganizer(e: React.FormEvent) {
+    e.preventDefault();
+    const email = linkEmail.trim().toLowerCase();
+    if (!email || !id) return;
+    setLinking(true);
+    try {
+      const { data } = await axiosInstance.post(`/adminurlabdkole/ambassadors/${id}/link-organizer`, {
+        organizer_email: email,
+      });
+      toast.success(data.message || "Organizer linked successfully.");
+      setLinkEmail("");
+      loadDetail();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || "Failed to link organizer.");
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  async function handleWithdrawalAction(withdrawalId: string, action: "approve" | "reject" | "pay", notes: string) {
+    setActionLoading(withdrawalId);
+    try {
+      await axiosInstance.patch(`/adminurlabdkole/ambassadors/withdrawals/${withdrawalId}`, { action, notes });
+      const label = action === "pay" ? "marked as paid" : action + "d";
+      toast.success(`Withdrawal ${label} successfully.`);
+      loadDetail();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || `Failed to ${action} withdrawal.`);
+    } finally {
+      setActionLoading(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -134,27 +176,67 @@ export default function AmbassadorDetailPage() {
         </TabsList>
 
         <TabsContent value="organizers">
-          <Card>
-            <CardHeader>
-              <CardTitle>Referred Organizers</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <DataTable
-                emptyText="No organizers have registered with this ambassador code yet."
-                headers={["Organizer", "Collections", "Earnings", "Status", "Joined"]}
-                rows={organizers.map((organizer) => [
-                  <div>
-                    <p className="font-medium">{organizer.name}</p>
-                    <p className="text-xs text-muted-foreground">{organizer.email || "-"}</p>
-                  </div>,
-                  organizer.collectionsInfluenced || organizer.collections?.length || 0,
-                  formatCurrency(organizer.earningsGenerated || 0),
-                  organizer.rewardStatus || "-",
-                  organizer.joinedAt ? formatDate(organizer.joinedAt) : "-",
-                ])}
-              />
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Referred Organizers</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <DataTable
+                  emptyText="No organizers have registered with this ambassador code yet."
+                  headers={["Organizer", "Collections", "Earnings", "Status", "Joined"]}
+                  rows={organizers.map((organizer) => [
+                    <div>
+                      <p className="font-medium">{organizer.name}</p>
+                      <p className="text-xs text-muted-foreground">{organizer.email || "-"}</p>
+                    </div>,
+                    organizer.collectionsInfluenced || organizer.collections?.length || 0,
+                    formatCurrency(organizer.earningsGenerated || 0),
+                    organizer.rewardStatus || "-",
+                    organizer.joinedAt ? formatDate(organizer.joinedAt) : "-",
+                  ])}
+                />
+              </CardContent>
+            </Card>
+
+            {/* Retroactive organizer attribution */}
+            <Card className="border-amber-100 bg-amber-50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base text-amber-900">Link Organizer Retroactively</CardTitle>
+                <p className="text-sm text-amber-700">
+                  Use this when an organizer was referred in person but registered without the referral link.
+                  Linking sets the referral relationship and backfills all historical contribution earnings.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleLinkOrganizer} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="flex-1 space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                      Organizer email address
+                    </label>
+                    <Input
+                      type="email"
+                      placeholder="organizer@example.com"
+                      value={linkEmail}
+                      onChange={(e) => setLinkEmail(e.target.value)}
+                      required
+                      className="bg-white"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={linking || !linkEmail.trim()}
+                    className="bg-amber-700 text-white hover:bg-amber-600"
+                  >
+                    {linking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Link Organizer"}
+                  </Button>
+                </form>
+                <p className="mt-2 text-xs text-amber-600">
+                  This action is reversible only via direct DB intervention. Verify the organizer email before linking.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="accounts">
@@ -165,12 +247,12 @@ export default function AmbassadorDetailPage() {
             <CardContent className="p-0">
               <DataTable
                 emptyText="No payout account has been connected for this ambassador yet."
-                headers={["Bank", "Account", "Last 4", "Default", "Status"]}
+                headers={["Bank", "Account Holder", "Account Number", "Default", "Status"]}
                 rows={accounts.map((account) => [
-                  account.bank_name || "-",
-                  account.account_name || "-",
-                  account.account_last4 || "-",
-                  account.is_default ? "Yes" : "No",
+                  account.bankName || account.bank_name || "-",
+                  account.accountName || account.account_name || "-",
+                  account.accountNumber || (account.accountLast4 ? `****${account.accountLast4}` : account.account_last4 || "-"),
+                  (account.isDefault ?? account.is_default) ? "Yes" : "No",
                   account.status || "-",
                 ])}
               />
@@ -179,24 +261,78 @@ export default function AmbassadorDetailPage() {
         </TabsContent>
 
         <TabsContent value="withdrawals">
-          <Card>
-            <CardHeader>
-              <CardTitle>Ambassador Withdrawals</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <DataTable
-                emptyText="No ambassador withdrawal has been requested yet."
-                headers={["Amount", "Status", "Requested", "Processed", "Notes"]}
-                rows={withdrawals.map((withdrawal) => [
-                  formatCurrency(withdrawal.amount || 0),
-                  withdrawal.status || "-",
-                  withdrawal.requested_at ? formatDate(withdrawal.requested_at) : "-",
-                  withdrawal.processed_at ? formatDate(withdrawal.processed_at) : "-",
-                  withdrawal.admin_notes || "-",
-                ])}
+          <div className="space-y-4">
+            {/* Payout summary — totals come from backend metrics (already accounting for in-flight requests) */}
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <PayoutSummaryCard
+                label="Total Earnings"
+                value={formatCurrency(metrics.totalEarnings || 0)}
               />
-            </CardContent>
-          </Card>
+              <PayoutSummaryCard
+                label="Pending (Locked)"
+                value={formatCurrency(metrics.pendingEarnings || 0)}
+              />
+              <PayoutSummaryCard
+                label="Available Balance"
+                value={formatCurrency(metrics.availableEarnings || 0)}
+                highlight
+              />
+              <PayoutSummaryCard
+                label="Total Withdrawn"
+                value={formatCurrency(metrics.totalWithdrawn || 0)}
+              />
+            </div>
+
+            {/* Active payout account */}
+            {accounts.length > 0 && (
+              <Card className="border-green-100 bg-green-50">
+                <CardContent className="p-4">
+                  <p className="text-xs font-bold uppercase tracking-wide text-green-700">Primary Payout Account</p>
+                  {(() => {
+                    const primary = accounts.find((a: any) => a.isDefault ?? a.is_default) || accounts[0];
+                    return (
+                      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6">
+                        <div className="flex items-center gap-2">
+                          <Banknote className="h-4 w-4 text-green-700" />
+                          <span className="font-semibold text-green-950">{primary.bankName || primary.bank_name}</span>
+                        </div>
+                        <span className="text-sm text-green-800">{primary.accountName || primary.account_name}</span>
+                        <span className="font-mono text-sm font-semibold text-green-900">
+                          {primary.accountNumber || `****${primary.accountLast4 || primary.account_last4}`}
+                        </span>
+                        <Badge variant="outline" className="w-fit border-green-200 bg-white text-green-800">{primary.status || "active"}</Badge>
+                      </div>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Withdrawal rows */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-base">Withdrawal History</CardTitle>
+                <Button asChild size="sm" variant="outline" className="gap-2 text-xs">
+                  <Link to="/ambassador-withdrawals">
+                    <ExternalLink className="h-3 w-3" /> All Withdrawals
+                  </Link>
+                </Button>
+              </CardHeader>
+              <CardContent className="divide-y p-0">
+                {withdrawals.length === 0 && (
+                  <p className="p-8 text-center text-sm text-muted-foreground">No withdrawal request has been made yet.</p>
+                )}
+                {withdrawals.map((withdrawal: any) => (
+                  <WithdrawalRow
+                    key={withdrawal.id}
+                    withdrawal={withdrawal}
+                    onAction={handleWithdrawalAction}
+                    acting={actionLoading === withdrawal.id}
+                  />
+                ))}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -264,6 +400,139 @@ function InfoCard({ label, value }: { label: string; value: string }) {
         <p className="mt-2 font-medium">{value}</p>
       </CardContent>
     </Card>
+  );
+}
+
+function PayoutSummaryCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <Card className={highlight ? "border-green-200 bg-green-50" : ""}>
+      <CardContent className="p-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className={`mt-2 text-xl font-bold ${highlight ? "text-green-800" : "text-slate-950"}`}>{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function WithdrawalRow({
+  withdrawal,
+  onAction,
+  acting,
+}: {
+  withdrawal: any;
+  onAction: (id: string, action: "approve" | "reject" | "pay", notes: string) => void;
+  acting: boolean;
+}) {
+  const [expanded, setExpanded] = useState<"approve" | "reject" | "pay" | null>(null);
+  const [notes, setNotes] = useState("");
+
+  const canApprove = withdrawal.status === "pending";
+  const canPay = withdrawal.status === "approved";
+  const canReject = withdrawal.status === "pending" || withdrawal.status === "approved";
+
+  const confirm = () => {
+    if (!expanded) return;
+    onAction(withdrawal.id, expanded, notes);
+    setExpanded(null);
+    setNotes("");
+  };
+
+  const toggle = (action: "approve" | "reject" | "pay") =>
+    setExpanded((prev) => (prev === action ? null : action));
+
+  return (
+    <div className="p-4">
+      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+        <div>
+          <p className="font-semibold">{formatCurrency(withdrawal.amount || 0)}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Requested: {withdrawal.requested_at ? formatDate(withdrawal.requested_at) : "—"}
+            {withdrawal.processed_at ? ` · Processed: ${formatDate(withdrawal.processed_at)}` : ""}
+          </p>
+          {withdrawal.admin_notes && (
+            <p className="mt-1 text-xs text-muted-foreground">Notes: {withdrawal.admin_notes}</p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant="outline"
+            className={
+              withdrawal.status === "paid"
+                ? "border-green-200 bg-green-50 text-green-700"
+                : withdrawal.status === "approved"
+                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                  : withdrawal.status === "rejected"
+                    ? "border-red-200 bg-red-50 text-red-700"
+                    : "border-slate-200 bg-slate-50 text-slate-700"
+            }
+          >
+            {withdrawal.status}
+          </Badge>
+          {canApprove && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-green-200 text-green-700 hover:bg-green-50"
+              onClick={() => toggle("approve")}
+            >
+              Approve
+            </Button>
+          )}
+          {canPay && (
+            <Button
+              size="sm"
+              className="bg-green-900 text-white hover:bg-green-800"
+              onClick={() => toggle("pay")}
+            >
+              Mark Paid
+            </Button>
+          )}
+          {canReject && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-red-200 text-red-700 hover:bg-red-50"
+              onClick={() => toggle("reject")}
+            >
+              Reject
+            </Button>
+          )}
+        </div>
+      </div>
+      {expanded && (
+        <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
+          <p className="mb-2 text-sm font-medium text-slate-700">
+            {expanded === "approve" ? "Approve withdrawal" : expanded === "pay" ? "Mark as paid" : "Reject withdrawal"} — add notes (optional)
+          </p>
+          <Input
+            placeholder="Admin notes..."
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="bg-white"
+          />
+          <div className="mt-2 flex gap-2">
+            <Button
+              size="sm"
+              disabled={acting}
+              onClick={confirm}
+              className={expanded === "reject" ? "bg-red-700 text-white hover:bg-red-600" : "bg-green-900 text-white hover:bg-green-800"}
+            >
+              {acting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Confirm"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setExpanded(null);
+                setNotes("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
