@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -9,17 +9,21 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ShieldCheck,
   ArrowLeftRight,
   Heart,
   Wrench,
   Award,
   ActivitySquare,
+  Mail,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Sidebar = () => {
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [communicationsOpen, setCommunicationsOpen] = useState(location.pathname.startsWith("/communications"));
   const [pendingFundraisers, setPendingFundraisers] = useState(0);
   const [pendingWithdrawals, setPendingWithdrawals] = useState(0);
   const [pendingKyc, setPendingKyc] = useState(0);
@@ -123,6 +127,18 @@ export const Sidebar = () => {
       path: "/payment-monitoring",
     },
     {
+      name: "Communications",
+      icon: Mail,
+      path: "/communications",
+      children: [
+        { name: "Email Campaigns", path: "/communications/campaigns" },
+        { name: "Templates", path: "/communications/templates" },
+        { name: "Drafts", path: "/communications/campaigns?status=draft" },
+        { name: "Scheduled Emails", path: "/communications/campaigns?status=scheduled" },
+        { name: "Email Logs", path: "/communications/logs" },
+      ],
+    },
+    {
       name: "Settings",
       icon: Settings,
       path: "/settings",
@@ -167,46 +183,94 @@ export const Sidebar = () => {
       {/* Navigation */}
       <nav className="px-2 py-4 flex-1 overflow-y-auto">
         <ul className="space-y-1">
-          {navItems.map((item) => (
-            <li key={item.name}>
-              <NavLink
-                to={item.path}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center py-2 px-3 rounded-md transition-colors",
-                    isActive
-                      ? "bg-sidebar-accent text-sidebar-primary"
-                      : "hover:bg-sidebar-accent/50",
-                    collapsed ? "justify-center" : "justify-start",
-                  )
-                }
-                end={item.path === "/"}
-              >
-                <item.icon size={20} />
-                {!collapsed && <span className="ml-3 flex-1">{item.name}</span>}
-                {!collapsed && item.badge !== undefined && (
-                  <span
+          {navItems.map((item) => {
+            if (item.children) {
+              const isSectionActive = location.pathname.startsWith(item.path);
+              return (
+                <li key={item.name}>
+                  <button
+                    type="button"
+                    onClick={() => (collapsed ? setCollapsed(false) : setCommunicationsOpen((prev) => !prev))}
                     className={cn(
-                      "ml-auto text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-medium",
-                      item.badgeColor || "bg-status-pending",
+                      "flex w-full items-center py-2 px-3 rounded-md transition-colors",
+                      isSectionActive ? "text-sidebar-primary" : "hover:bg-sidebar-accent/50",
+                      collapsed ? "justify-center" : "justify-start",
                     )}
                   >
-                    {item.badge > 99 ? "99+" : item.badge}
-                  </span>
-                )}
-                {collapsed && item.badge !== undefined && (
-                  <span
-                    className={cn(
-                      "absolute top-1 right-1 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs font-medium",
-                      item.badgeColor || "bg-status-pending",
+                    <item.icon size={20} />
+                    {!collapsed && (
+                      <>
+                        <span className="ml-3 flex-1 text-left">{item.name}</span>
+                        <ChevronDown size={16} className={cn("transition-transform", communicationsOpen && "rotate-180")} />
+                      </>
                     )}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </NavLink>
-            </li>
-          ))}
+                  </button>
+                  {!collapsed && communicationsOpen && (
+                    <ul className="mt-1 space-y-1 border-l border-sidebar-border pl-6">
+                      {item.children.map((child) => (
+                        <li key={child.name}>
+                          <NavLink
+                            to={child.path}
+                            className={({ isActive }) =>
+                              cn(
+                                "block rounded-md py-1.5 px-3 text-sm transition-colors",
+                                isActive && location.search === (child.path.split("?")[1] ? `?${child.path.split("?")[1]}` : "")
+                                  ? "bg-sidebar-accent text-sidebar-primary"
+                                  : "hover:bg-sidebar-accent/50",
+                              )
+                            }
+                          >
+                            {child.name}
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            }
+
+            return (
+              <li key={item.name}>
+                <NavLink
+                  to={item.path}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center py-2 px-3 rounded-md transition-colors",
+                      isActive
+                        ? "bg-sidebar-accent text-sidebar-primary"
+                        : "hover:bg-sidebar-accent/50",
+                      collapsed ? "justify-center" : "justify-start",
+                    )
+                  }
+                  end={item.path === "/"}
+                >
+                  <item.icon size={20} />
+                  {!collapsed && <span className="ml-3 flex-1">{item.name}</span>}
+                  {!collapsed && item.badge !== undefined && (
+                    <span
+                      className={cn(
+                        "ml-auto text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-medium",
+                        item.badgeColor || "bg-status-pending",
+                      )}
+                    >
+                      {item.badge > 99 ? "99+" : item.badge}
+                    </span>
+                  )}
+                  {collapsed && item.badge !== undefined && (
+                    <span
+                      className={cn(
+                        "absolute top-1 right-1 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs font-medium",
+                        item.badgeColor || "bg-status-pending",
+                      )}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </NavLink>
+              </li>
+            );
+          })}
         </ul>
       </nav>
 

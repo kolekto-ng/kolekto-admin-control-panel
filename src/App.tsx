@@ -35,6 +35,10 @@ const AmbassadorDetailPage = lazy(() => import("./pages/AmbassadorDetailPage"));
 const AmbassadorWithdrawalsPage = lazy(() => import("./pages/AmbassadorWithdrawalsPage"));
 const PaymentMonitoringPage = lazy(() => import("./pages/PaymentMonitoringPage"));
 const PaymentMonitoringDetailPage = lazy(() => import("./pages/PaymentMonitoringDetailPage"));
+const EmailCampaignsPage = lazy(() => import("./pages/communications/EmailCampaignsPage"));
+const EmailCampaignBuilderPage = lazy(() => import("./pages/communications/EmailCampaignBuilderPage"));
+const EmailTemplatesPage = lazy(() => import("./pages/communications/EmailTemplatesPage"));
+const EmailLogsPage = lazy(() => import("./pages/communications/EmailLogsPage"));
 
 const queryClient = new QueryClient();
 
@@ -86,6 +90,10 @@ const App = () => (
                 path="payment-monitoring/:reference"
                 element={<PaymentMonitoringDetailPage />}
               />
+              <Route path="communications/campaigns" element={<EmailCampaignsPage />} />
+              <Route path="communications/campaigns/:id" element={<EmailCampaignBuilderPage />} />
+              <Route path="communications/templates" element={<EmailTemplatesPage />} />
+              <Route path="communications/logs" element={<EmailLogsPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
