@@ -7,6 +7,66 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BOUNDED AUTH LOCK — root-cause fix for the admin "navigate → loads forever,
+// refresh fixes it" freeze.
+//
+// supabase-js serializes every getSession()/rpc()/from() call (each needs the
+// access token) behind a single Web Lock keyed on the auth storage key. Its
+// default browser lock (navigatorLock) acquires that lock with NO timeout
+// (acquireTimeout = -1). When the background token refresh stalls while holding
+// the lock (supabase's refresh fetch has no client-side timeout), every
+// subsequent auth-touching call — i.e. every data read in the app — waits on
+// that lock forever. Client-side navigation keeps the document (and the stuck
+// lock) alive, so pages hang until a full reload destroys the document and
+// releases the lock.
+//
+// This bounded lock waits at most AUTH_LOCK_TIMEOUT_MS for the Web Lock, then
+// proceeds best-effort (runs the operation without holding the lock) — exactly
+// what supabase already does in environments that lack the Web Locks API. A
+// stalled holder therefore can never wedge the session layer; the worst case is
+// a rare, unsynchronized token read, not a permanent freeze.
+// ─────────────────────────────────────────────────────────────────────────────
+const AUTH_LOCK_TIMEOUT_MS = 8000;
+
+async function boundedAuthLock<R>(
+  name: string,
+  _acquireTimeout: number,
+  fn: () => Promise<R>,
+): Promise<R> {
+  const locks = (globalThis as unknown as { navigator?: { locks?: LockManager } })
+    ?.navigator?.locks;
+
+  // No Web Locks API available → run best-effort (supabase's own fallback).
+  if (!locks?.request) {
+    return await fn();
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AUTH_LOCK_TIMEOUT_MS);
+
+  try {
+    return await locks.request(
+      name,
+      { signal: controller.signal },
+      async () => await fn(),
+    );
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError") {
+      // Could not acquire within the timeout — a holder is stuck. Proceed
+      // best-effort instead of hanging forever (the freeze this fixes).
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[supabase lock] '${name}' not acquired in ${AUTH_LOCK_TIMEOUT_MS}ms — proceeding best-effort`,
+      );
+      return await fn();
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const supabase = createClient<Database>(
   SUPABASE_URL,
   SUPABASE_PUBLISHABLE_KEY,
@@ -15,6 +75,7 @@ export const supabase = createClient<Database>(
       persistSession: true,
       autoRefreshToken: true,
       storageKey: "kolekto-auth-token",
+      lock: boundedAuthLock,
     },
   }
 );
