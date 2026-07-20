@@ -50,22 +50,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     set({ loading: true, error: null });
 
     try {
-      const [
-        { count: totalUsers },
-        { count: totalCollections },
-        { data: contributionsData },
-        { data: withdrawalsData },
-        { count: pendingWithdrawals },
-        { count: totalCampaigns },
-        { count: pendingFundraisers },
-        { count: activeCampaigns },
-        { data: collectionTypeData },
-        { data: recentContributions },
-        { data: recentWithdrawals },
-        { data: walletsData },
-        { count: pendingKyc },
-        { count: totalKycSubmissions },
-      ] = await Promise.all([
+      // Promise.allSettled (not Promise.all): a single flaky sub-query — a
+      // transient network blip or one bad relationship embed — used to reject
+      // the whole batch and blank the entire dashboard with "Failed to load".
+      // Now each metric degrades independently; the page still renders what it
+      // could fetch. Only a TOTAL failure surfaces the error state.
+      const settled = await Promise.allSettled([
         supabase.from("profiles").select("*", { count: "exact", head: true }),
         supabase.from("collections").select("*", { count: "exact", head: true }),
         supabase.from("contributions").select("amount").eq("status", "paid"),
@@ -105,6 +95,34 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           .from("kyc_verifications")
           .select("*", { count: "exact", head: true }),
       ]);
+
+      // If every single query failed, this is a real load failure — surface it.
+      if (settled.every((r) => r.status === "rejected")) {
+        console.error("Error fetching dashboard data: all queries failed");
+        set({ error: "Failed to load dashboard data", loading: false });
+        return;
+      }
+      // Extract each result independently; a rejected one degrades to empty.
+      const at = (i: number): any => {
+        const r = settled[i];
+        if (r.status === "fulfilled") return r.value ?? {};
+        console.warn(`[dashboardStore] sub-query ${i} failed:`, (r.reason as any)?.message ?? r.reason);
+        return {};
+      };
+      const totalUsers = at(0).count;
+      const totalCollections = at(1).count;
+      const contributionsData = at(2).data;
+      const withdrawalsData = at(3).data;
+      const pendingWithdrawals = at(4).count;
+      const totalCampaigns = at(5).count;
+      const pendingFundraisers = at(6).count;
+      const activeCampaigns = at(7).count;
+      const collectionTypeData = at(8).data;
+      const recentContributions = at(9).data;
+      const recentWithdrawals = at(10).data;
+      const walletsData = at(11).data;
+      const pendingKyc = at(12).count;
+      const totalKycSubmissions = at(13).count;
 
       // Calculate totals
       const totalContributions =
