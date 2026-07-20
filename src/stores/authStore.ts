@@ -268,39 +268,44 @@ export const useAuthStore = create<AuthState>()(
           initialized: true,
         });
 
-        // Re-check DB membership on every subsequent session change.
-        supabase.auth.onAuthStateChange(async (_event, newSession) => {
-          let nextRole: AdminRole | null = null;
-          if (newSession?.user) {
+        // Re-verify admin membership on session changes — but NOT on every
+        // event. A TOKEN_REFRESHED fires roughly hourly and only rotates the
+        // JWT; it can't change admin membership, so re-running the admin RPC
+        // there was pure churn against the auth lock (a contributor to the
+        // nav-freeze path). Only re-check on events that can actually change
+        // identity/authorization; otherwise just track the session and keep the
+        // known role.
+        supabase.auth.onAuthStateChange(async (event, newSession) => {
+          const shouldRecheck = event === "SIGNED_IN" || event === "USER_UPDATED";
+
+          // Default: preserve the role we already resolved.
+          let nextRole: AdminRole | null = get().role;
+
+          if (newSession?.user && shouldRecheck) {
             const result = await isAuthenticatedUserAdmin();
-            if (result.isAdmin) nextRole = result.role;
-            if (!result.isAdmin) {
-              if (result.code === "environment_mismatch") {
-                setSessionRedirectReason("environment_mismatch");
-                await clearSessionLocally();
-                set({ user: null, session: null });
-                return;
-              } else if (result.code === "not_admin") {
-                // Definitively not an admin — sign out.
-                setSessionRedirectReason("demoted");
-                void supabase.auth.signOut();
-                set({ user: null, session: null });
-                return;
-              } else if (result.code === "error") {
-                // RPC failure — keep existing session, don't sign out.
-                console.warn("[authStore] onAuthStateChange: admin RPC failed — keeping session.");
-                // Fall through to normal state update below.
-              }
+            if (result.isAdmin) {
+              nextRole = result.role;
+            } else if (result.code === "environment_mismatch") {
+              setSessionRedirectReason("environment_mismatch");
+              await clearSessionLocally();
+              set({ user: null, session: null, role: null });
+              return;
+            } else if (result.code === "not_admin") {
+              // Definitively not an admin — sign out.
+              setSessionRedirectReason("demoted");
+              void supabase.auth.signOut();
+              set({ user: null, session: null, role: null });
+              return;
+            } else if (result.code === "error") {
+              // RPC failure — keep existing session and role, don't sign out.
+              console.warn("[authStore] onAuthStateChange: admin RPC failed — keeping session, role unchanged.");
             }
           }
-          // On a signed-in session, use the freshly resolved role; if the RPC
-          // errored (nextRole null) preserve the previously known role so a
-          // token refresh doesn't transiently drop a super-admin's access.
-          // On sign-out (no user) clear the role.
+
           set({
             user: newSession?.user ?? null,
             session: newSession,
-            role: newSession?.user ? (nextRole ?? get().role) : null,
+            role: newSession?.user ? nextRole : null,
           });
         });
       },
