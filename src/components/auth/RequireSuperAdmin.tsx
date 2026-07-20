@@ -7,17 +7,18 @@ import { useAuthStore } from "@/stores/authStore";
  *
  * This is defense-in-depth — the backend independently returns 403 on the
  * APIs powering these pages (see utils/requireAdmin.js `requireSuperAdmin`).
- * We only redirect on a *confirmed* 'admin' role; an unresolved role (null,
- * e.g. the admin RPC errored and the session was accepted optimistically) is
- * allowed through so a super-admin is never falsely locked out of a page —
- * the backend stays the authority.
+ * Least-privilege on uncertainty: access requires an explicit 'superadmin'
+ * role. An unresolved role (null — e.g. the admin RPC errored and the session
+ * was accepted optimistically) is treated as NON-super and redirected; the
+ * session persists the role once resolved, so this only affects the rare
+ * cold-start-error window, and the backend remains the authority.
  *
  * Rendered as a layout route wrapping the protected children via <Outlet/>.
  */
 export const RequireSuperAdmin = () => {
   const role = useAuthStore((s) => s.role);
 
-  if (role === "admin") {
+  if (role !== "superadmin") {
     return <Navigate to="/" replace />;
   }
 

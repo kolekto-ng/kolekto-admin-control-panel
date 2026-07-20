@@ -23,10 +23,11 @@ import { useAuthStore } from "@/stores/authStore";
 
 export const Sidebar = () => {
   const location = useLocation();
-  // Task 2: hide super-admin-only sections from a confirmed 'admin'. An
-  // unresolved role (null) is treated permissively; the backend still 403s.
+  // Task 2: super-admin-only sections require an explicit 'superadmin' role.
+  // Least-privilege on uncertainty — an unresolved role (null) is treated as
+  // non-super and the items are hidden; the backend still 403s regardless.
   const role = useAuthStore((s) => s.role);
-  const isRestrictedAdmin = role === "admin";
+  const isSuperAdmin = role === "superadmin";
   const [collapsed, setCollapsed] = useState(false);
   const [communicationsOpen, setCommunicationsOpen] = useState(location.pathname.startsWith("/communications"));
   const [pendingFundraisers, setPendingFundraisers] = useState(0);
@@ -152,7 +153,7 @@ export const Sidebar = () => {
       path: "/settings",
       superAdminOnly: true,
     },
-  ].filter((item) => !((item as { superAdminOnly?: boolean }).superAdminOnly && isRestrictedAdmin));
+  ].filter((item) => !((item as { superAdminOnly?: boolean }).superAdminOnly && !isSuperAdmin));
 
   return (
     <div
