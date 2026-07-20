@@ -19,9 +19,14 @@ import {
   Mail,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuthStore } from "@/stores/authStore";
 
 export const Sidebar = () => {
   const location = useLocation();
+  // Task 2: hide super-admin-only sections from a confirmed 'admin'. An
+  // unresolved role (null) is treated permissively; the backend still 403s.
+  const role = useAuthStore((s) => s.role);
+  const isRestrictedAdmin = role === "admin";
   const [collapsed, setCollapsed] = useState(false);
   const [communicationsOpen, setCommunicationsOpen] = useState(location.pathname.startsWith("/communications"));
   const [pendingFundraisers, setPendingFundraisers] = useState(0);
@@ -91,6 +96,7 @@ export const Sidebar = () => {
       path: "/withdrawals",
       badge: pendingWithdrawals > 0 ? pendingWithdrawals : undefined,
       badgeColor: "bg-status-pending",
+      superAdminOnly: true,
     },
     {
       name: "Transactions",
@@ -108,6 +114,7 @@ export const Sidebar = () => {
       path: "/ambassador-withdrawals",
       badge: pendingAmbassadorWithdrawals > 0 ? pendingAmbassadorWithdrawals : undefined,
       badgeColor: "bg-green-600",
+      superAdminOnly: true,
     },
     {
       name: "KYC",
@@ -130,6 +137,7 @@ export const Sidebar = () => {
       name: "Communications",
       icon: Mail,
       path: "/communications",
+      superAdminOnly: true,
       children: [
         { name: "Email Campaigns", path: "/communications/campaigns" },
         { name: "Templates", path: "/communications/templates" },
@@ -142,8 +150,9 @@ export const Sidebar = () => {
       name: "Settings",
       icon: Settings,
       path: "/settings",
+      superAdminOnly: true,
     },
-  ];
+  ].filter((item) => !((item as { superAdminOnly?: boolean }).superAdminOnly && isRestrictedAdmin));
 
   return (
     <div
@@ -288,7 +297,9 @@ export const Sidebar = () => {
           {!collapsed && (
             <div>
               <p className="font-medium text-sm">Admin</p>
-              <p className="text-xs text-muted-foreground">Super Admin</p>
+              <p className="text-xs text-muted-foreground">
+                {role === "superadmin" ? "Super Admin" : "Admin"}
+              </p>
             </div>
           )}
         </div>

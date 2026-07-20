@@ -68,8 +68,13 @@ export function consumeSessionRedirectReason(): string | null {
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN ACCESS — DB-backed (public.admin_users)
 // ─────────────────────────────────────────────────────────────────────────────
+// Admin role, sourced from public.admin_users via the current_admin_user RPC.
+// This is the SINGLE authorization source for the whole admin panel — no
+// hardcoded emails, no env checks, no frontend role definitions.
+export type AdminRole = "admin" | "superadmin";
+
 type AdminCheckResult =
-  | { isAdmin: true }
+  | { isAdmin: true; role: AdminRole }
   | { isAdmin: false; code: "not_admin" }
   | { isAdmin: false; code: "environment_mismatch" }
   | { isAdmin: false; code: "error" };
@@ -91,8 +96,15 @@ async function isAuthenticatedUserAdmin(): Promise<AdminCheckResult> {
       }
       return { isAdmin: false, code: "error" };
     }
-    const hasAccess = Array.isArray(data) ? data.length > 0 : Boolean(data);
-    return hasAccess ? { isAdmin: true } : { isAdmin: false, code: "not_admin" };
+    // current_admin_user() returns a table (0 or 1 rows) with { role }. The
+    // generated Supabase types don't include this RPC, so cast to the shape we
+    // know it returns.
+    const row = (Array.isArray(data) ? data[0] : data) as { role?: string } | null | undefined;
+    if (!row) return { isAdmin: false, code: "not_admin" };
+    // Anything that isn't the explicit 'superadmin' string degrades to the
+    // least-privilege 'admin' — a malformed role must never grant more access.
+    const role: AdminRole = row.role === "superadmin" ? "superadmin" : "admin";
+    return { isAdmin: true, role };
   } catch (err) {
     console.error("[authStore] admin lookup threw:", err);
     return { isAdmin: false, code: "error" };
@@ -121,6 +133,11 @@ async function clearSessionLocally() {
 interface AuthState {
   user: User | null;
   session: Session | null;
+  // Admin role from admin_users. `null` = not yet resolved (e.g. the RPC
+  // errored and the session was accepted optimistically). Consumers treat
+  // only the explicit 'admin' value as "restricted"; the backend remains the
+  // authority and 403s regardless.
+  role: AdminRole | null;
   loading: boolean;
   initialized: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
@@ -133,6 +150,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       session: null,
+      role: null,
       loading: false,
       initialized: false,
 
@@ -160,7 +178,7 @@ export const useAuthStore = create<AuthState>()(
               // requests surface the real access level. The admin panel's protected
               // routes will catch unauthorized access at the data layer.
               console.warn("[authStore] signIn: admin RPC check failed — accepting new session optimistically");
-              set({ user: data.user, session: data.session, loading: false });
+              set({ user: data.user, session: data.session, role: null, loading: false });
               return { error: null };
             }
 
@@ -168,7 +186,7 @@ export const useAuthStore = create<AuthState>()(
             try {
               await supabase.auth.signOut();
             } catch { /* ignore */ }
-            set({ user: null, session: null, loading: false });
+            set({ user: null, session: null, role: null, loading: false });
             return {
               error: {
                 message: SESSION_REDIRECT_REASONS.not_admin,
@@ -177,7 +195,7 @@ export const useAuthStore = create<AuthState>()(
             };
           }
 
-          set({ user: data.user, session: data.session, loading: false });
+          set({ user: data.user, session: data.session, role: result.role, loading: false });
           return { error: null };
         } catch (error) {
           set({ loading: false });
@@ -190,7 +208,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           await supabase.auth.signOut();
         } catch { /* ignore — we're clearing state regardless */ }
-        set({ user: null, session: null, loading: false });
+        set({ user: null, session: null, role: null, loading: false });
       },
 
       initialize: async () => {
@@ -201,8 +219,10 @@ export const useAuthStore = create<AuthState>()(
           data: { session },
         } = await supabase.auth.getSession();
 
+        let resolvedRole: AdminRole | null = null;
         if (session?.user) {
           const result = await isAuthenticatedUserAdmin();
+          if (result.isAdmin) resolvedRole = result.role;
 
           if (!result.isAdmin) {
             if (result.code === "environment_mismatch") {
@@ -243,14 +263,17 @@ export const useAuthStore = create<AuthState>()(
         set({
           user: session?.user ?? null,
           session,
+          role: resolvedRole,
           loading: false,
           initialized: true,
         });
 
         // Re-check DB membership on every subsequent session change.
         supabase.auth.onAuthStateChange(async (_event, newSession) => {
+          let nextRole: AdminRole | null = null;
           if (newSession?.user) {
             const result = await isAuthenticatedUserAdmin();
+            if (result.isAdmin) nextRole = result.role;
             if (!result.isAdmin) {
               if (result.code === "environment_mismatch") {
                 setSessionRedirectReason("environment_mismatch");
@@ -270,7 +293,15 @@ export const useAuthStore = create<AuthState>()(
               }
             }
           }
-          set({ user: newSession?.user ?? null, session: newSession });
+          // On a signed-in session, use the freshly resolved role; if the RPC
+          // errored (nextRole null) preserve the previously known role so a
+          // token refresh doesn't transiently drop a super-admin's access.
+          // On sign-out (no user) clear the role.
+          set({
+            user: newSession?.user ?? null,
+            session: newSession,
+            role: newSession?.user ? (nextRole ?? get().role) : null,
+          });
         });
       },
     }),
@@ -279,6 +310,7 @@ export const useAuthStore = create<AuthState>()(
       partialize: (state) => ({
         user: state.user,
         session: state.session,
+        role: state.role,
       }),
     }
   )

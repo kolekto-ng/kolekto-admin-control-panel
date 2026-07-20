@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { AdminLayout } from "./components/layout/AdminLayout";
+import { RequireSuperAdmin } from "./components/auth/RequireSuperAdmin";
 
 // Every route is its own chunk, fetched only when the admin actually
 // navigates there — previously all 22 pages (plus everything they import,
@@ -65,12 +66,9 @@ const App = () => (
               <Route path="users/:id" element={<UserDetailPage />} />
               <Route path="collections" element={<CollectionsPage />} />
               <Route path="collections/:id" element={<CollectionDetailPage />} />
-              <Route path="withdrawals" element={<WithdrawalsPage />} />
-              <Route path="withdrawals/:id" element={<WithdrawalDetailPage />} />
               <Route path="fundraising" element={<FundraisingPage />} />
               <Route path="fundraising/:id" element={<FundraisingDetailPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
-              <Route path="settings" element={<SettingsPage />} />
               <Route path="kyc" element={<AdminKYCDashboard />} />
               <Route path="kyc/:userId" element={<KYCDetailPage />} />
               <Route path="transactions" element={<TransactionsPage />} />
@@ -79,7 +77,6 @@ const App = () => (
                 element={<AmbassadorApplicationsPage />}
               />
               <Route path="ambassadors/:id" element={<AmbassadorDetailPage />} />
-              <Route path="ambassador-withdrawals" element={<AmbassadorWithdrawalsPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="reconcile" element={<ReconcilePaymentPage />} />
               <Route
@@ -90,10 +87,21 @@ const App = () => (
                 path="payment-monitoring/:reference"
                 element={<PaymentMonitoringDetailPage />}
               />
-              <Route path="communications/campaigns" element={<EmailCampaignsPage />} />
-              <Route path="communications/campaigns/:id" element={<EmailCampaignBuilderPage />} />
-              <Route path="communications/templates" element={<EmailTemplatesPage />} />
-              <Route path="communications/logs" element={<EmailLogsPage />} />
+
+              {/* ── SUPER-ADMIN ONLY (Task 2) ───────────────────────────────
+                  Withdrawals, Ambassador Payouts, Communications, Settings.
+                  Backend independently 403s the APIs behind these; this guard
+                  hides the pages from a plain 'admin'. */}
+              <Route element={<RequireSuperAdmin />}>
+                <Route path="withdrawals" element={<WithdrawalsPage />} />
+                <Route path="withdrawals/:id" element={<WithdrawalDetailPage />} />
+                <Route path="ambassador-withdrawals" element={<AmbassadorWithdrawalsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                <Route path="communications/campaigns" element={<EmailCampaignsPage />} />
+                <Route path="communications/campaigns/:id" element={<EmailCampaignBuilderPage />} />
+                <Route path="communications/templates" element={<EmailTemplatesPage />} />
+                <Route path="communications/logs" element={<EmailLogsPage />} />
+              </Route>
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
