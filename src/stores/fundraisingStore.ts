@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
+import { axiosInstance } from "@/lib/axios";
 
 export type CampaignStatus =
   | "draft" | "pending_verification" | "active" | "paused"
@@ -83,6 +84,11 @@ interface FundraisingState {
   stats: FundraisingStats;
   fetchCampaigns: () => Promise<void>;
   fetchCampaignById: (id: string) => Promise<void>;
+  transitionCampaignStatus: (
+    id: string,
+    action: "approve" | "reject" | "pause" | "resume" | "close",
+    reason?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   approveCampaign: (id: string) => Promise<{ success: boolean; error?: string }>;
   rejectCampaign: (id: string, reason: string) => Promise<{ success: boolean; error?: string }>;
   pauseCampaign: (id: string) => Promise<{ success: boolean; error?: string }>;
@@ -91,7 +97,7 @@ interface FundraisingState {
 }
 
 
-export const useFundraisingStore = create<FundraisingState>((set) => ({
+export const useFundraisingStore = create<FundraisingState>((set, get) => ({
   campaigns: [],
   selectedCampaign: null,
   loading: false,
@@ -319,80 +325,75 @@ export const useFundraisingStore = create<FundraisingState>((set) => ({
     }
   },
 
-  approveCampaign: async (id: string) => {
+  // ── Status transitions ──────────────────────────────────────────────────
+  // Previously each of these ran two independent, non-transactional Supabase
+  // `.update()` calls (collections + campaigns) via Promise.all — approve/
+  // reject only checked the FIRST promise's error, and pause/resume/close
+  // checked neither, so a partial failure (e.g. an RLS/permission error on
+  // just one table) still showed a success toast while the two tables
+  // silently diverged or nothing persisted at all.
+  //
+  // Fixed: this now calls a single backend endpoint
+  // (POST /adminurlabdkole/campaigns/:id/status) that performs both updates
+  // inside one atomic Postgres function
+  // (database/admin_atomic_campaign_status_2026-08-06.sql) — either both
+  // tables update together, or neither does, and the backend surfaces a real
+  // HTTP error on any failure instead of a false-positive success. Local
+  // state is only updated from the row the backend actually confirms was
+  // written, not assumed from the requested action.
+  transitionCampaignStatus: async (id: string, action: "approve" | "reject" | "pause" | "resume" | "close", reason?: string) => {
     try {
-      const now = new Date().toISOString();
-      const [{ error: e1 }] = await Promise.all([
-        supabase.from("collections").update({ status: "active", updated_at: now }).eq("id", id),
-        supabase.from("campaigns").update({ status: "active", verified_at: now, updated_at: now }).eq("id", id),
-      ]);
-      if (e1) throw e1;
+      const { data } = await axiosInstance.post(`/adminurlabdkole/campaigns/${id}/status`, {
+        action,
+        ...(reason !== undefined ? { reason } : {}),
+      });
+      const updated = data?.campaign;
+      if (!updated) throw new Error("Backend did not return the updated campaign");
+
       set((s) => ({
-        campaigns: s.campaigns.map((c) => c.id === id ? { ...c, status: "active" as CampaignStatus, verified_at: now } : c),
-        selectedCampaign: s.selectedCampaign?.id === id ? { ...s.selectedCampaign, status: "active" as CampaignStatus, verified_at: now } : s.selectedCampaign,
+        campaigns: s.campaigns.map((c) =>
+          c.id === id
+            ? {
+                ...c,
+                status: updated.campaign_status as CampaignStatus,
+                verified_at: updated.verified_at ?? c.verified_at,
+              }
+            : c
+        ),
+        selectedCampaign:
+          s.selectedCampaign?.id === id
+            ? {
+                ...s.selectedCampaign,
+                status: updated.campaign_status as CampaignStatus,
+                verified_at: updated.verified_at ?? s.selectedCampaign.verified_at,
+              }
+            : s.selectedCampaign,
       }));
-      return { success: true };
-    } catch (err: any) { return { success: false, error: err.message }; }
+      return { success: true as const };
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.error || err?.message || `Failed to ${action} campaign`;
+      return { success: false as const, error: message };
+    }
+  },
+
+  approveCampaign: async (id: string) => {
+    return get().transitionCampaignStatus(id, "approve");
   },
 
   rejectCampaign: async (id: string, reason: string) => {
-    try {
-      const now = new Date().toISOString();
-      const [{ error: e1 }] = await Promise.all([
-        supabase.from("collections").update({ status: "rejected", rejection_reason: reason, updated_at: now }).eq("id", id),
-        supabase.from("campaigns").update({ status: "rejected", updated_at: now }).eq("id", id),
-      ]);
-      if (e1) throw e1;
-      set((s) => ({
-        campaigns: s.campaigns.map((c) => c.id === id ? { ...c, status: "rejected" as CampaignStatus } : c),
-        selectedCampaign: s.selectedCampaign?.id === id ? { ...s.selectedCampaign, status: "rejected" as CampaignStatus } : s.selectedCampaign,
-      }));
-      return { success: true };
-    } catch (err: any) { return { success: false, error: err.message }; }
+    return get().transitionCampaignStatus(id, "reject", reason);
   },
 
   pauseCampaign: async (id: string) => {
-    try {
-      const now = new Date().toISOString();
-      await Promise.all([
-        supabase.from("collections").update({ status: "paused", updated_at: now }).eq("id", id),
-        supabase.from("campaigns").update({ status: "paused", updated_at: now }).eq("id", id),
-      ]);
-      set((s) => ({
-        campaigns: s.campaigns.map((c) => c.id === id ? { ...c, status: "paused" as CampaignStatus } : c),
-        selectedCampaign: s.selectedCampaign?.id === id ? { ...s.selectedCampaign, status: "paused" as CampaignStatus } : s.selectedCampaign,
-      }));
-      return { success: true };
-    } catch (err: any) { return { success: false, error: err.message }; }
+    return get().transitionCampaignStatus(id, "pause");
   },
 
   resumeCampaign: async (id: string) => {
-    try {
-      const now = new Date().toISOString();
-      await Promise.all([
-        supabase.from("collections").update({ status: "active", updated_at: now }).eq("id", id),
-        supabase.from("campaigns").update({ status: "active", updated_at: now }).eq("id", id),
-      ]);
-      set((s) => ({
-        campaigns: s.campaigns.map((c) => c.id === id ? { ...c, status: "active" as CampaignStatus } : c),
-        selectedCampaign: s.selectedCampaign?.id === id ? { ...s.selectedCampaign, status: "active" as CampaignStatus } : s.selectedCampaign,
-      }));
-      return { success: true };
-    } catch (err: any) { return { success: false, error: err.message }; }
+    return get().transitionCampaignStatus(id, "resume");
   },
 
   closeCampaign: async (id: string) => {
-    try {
-      const now = new Date().toISOString();
-      await Promise.all([
-        supabase.from("collections").update({ status: "closed", updated_at: now }).eq("id", id),
-        supabase.from("campaigns").update({ status: "closed", updated_at: now }).eq("id", id),
-      ]);
-      set((s) => ({
-        campaigns: s.campaigns.map((c) => c.id === id ? { ...c, status: "closed" as CampaignStatus } : c),
-        selectedCampaign: s.selectedCampaign?.id === id ? { ...s.selectedCampaign, status: "closed" as CampaignStatus } : s.selectedCampaign,
-      }));
-      return { success: true };
-    } catch (err: any) { return { success: false, error: err.message }; }
+    return get().transitionCampaignStatus(id, "close");
   },
 }));
