@@ -31,7 +31,7 @@ const COLLECTION_TYPE_COLORS: Record<string, string> = {
 };
 
 const Dashboard = () => {
-  const { stats, transactions, loading, error, fetchDashboardData } = useDashboardStore();
+  const { stats, transactions, loading, error, partialErrors, fetchDashboardData } = useDashboardStore();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -47,6 +47,19 @@ const Dashboard = () => {
       });
     }
   }, [error, toast]);
+
+  // Some (not all) dashboard metrics failed to load — the affected numbers
+  // above may be stale or showing 0 without that being a real zero. Distinct
+  // from `error`, which only fires when EVERY metric failed.
+  useEffect(() => {
+    if (partialErrors.length > 0) {
+      toast({
+        title: 'Some dashboard data may be incomplete',
+        description: `Could not load: ${partialErrors.join(', ')}. Other figures shown are still accurate.`,
+        variant: 'destructive',
+      });
+    }
+  }, [partialErrors, toast]);
 
   return (
     <div className="space-y-6">
