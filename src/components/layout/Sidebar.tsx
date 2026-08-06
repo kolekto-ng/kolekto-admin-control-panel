@@ -6,7 +6,6 @@ import {
   Users,
   Folders,
   Wallet,
-  Settings,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -147,12 +146,19 @@ export const Sidebar = () => {
         { name: "Email Logs", path: "/communications/logs" },
       ],
     },
-    {
-      name: "Settings",
-      icon: Settings,
-      path: "/settings",
-      superAdminOnly: true,
-    },
+    // Settings is deliberately NOT listed here.
+    //
+    // The page has no backend behind it: a grep of kolekto-be-old's routes/ and
+    // controllers/ finds no admin platform-settings endpoint and no settings
+    // table (routes/settings/{profile,kyc,security}.js are END-USER account
+    // routes, a different feature). SettingsPage.tsx therefore renders a "not
+    // yet available" notice — advertising it in the nav just sends admins to a
+    // dead end.
+    //
+    // The /settings ROUTE still exists so any bookmark or in-app link resolves
+    // to that honest notice instead of a 404. Re-add this entry once a real
+    // settings endpoint exists:
+    //   { name: "Settings", icon: Settings (re-add the lucide import), path: "/settings", superAdminOnly: true },
   ].filter((item) => !((item as { superAdminOnly?: boolean }).superAdminOnly && !isSuperAdmin));
 
   return (
