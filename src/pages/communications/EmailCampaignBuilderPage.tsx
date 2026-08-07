@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import {
@@ -96,6 +97,20 @@ export default function EmailCampaignBuilderPage() {
   const [addingRecipients, setAddingRecipients] = useState(false);
   const [removingRecipientId, setRemovingRecipientId] = useState<string | null>(null);
   const [recipientMode, setRecipientMode] = useState<"list" | "filter">("list");
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+
+  // Search-driven multi-select picker for "Explicit list" mode. Selections
+  // accumulate in `selectedPicks` across searches (typing a new query never
+  // clears it) and are mirrored to localStorage so they survive a page
+  // reload/reopen too — up until they're actually committed via
+  // handleAddSelectedPicks, at which point they're persisted server-side as
+  // real recipient rows instead.
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerResults, setPickerResults] = useState<RecipientSearchResult[]>([]);
+  const [pickerSearching, setPickerSearching] = useState(false);
+  const [selectedPicks, setSelectedPicks] = useState<Map<string, RecipientSearchResult>>(new Map());
+  const [showPasteBox, setShowPasteBox] = useState(false);
+
   const [audienceFilters, setAudienceFilters] = useState<AudienceFilters>({});
   const [audiencePreview, setAudiencePreview] = useState<AudiencePreview | null>(null);
   const [audiencePreviewLoading, setAudiencePreviewLoading] = useState(false);
@@ -220,8 +235,9 @@ export default function EmailCampaignBuilderPage() {
 
     setLoading(true);
     Promise.all([getCampaign(id), listRecipients(id, { limit: 50 }), listAttachments(id)])
-      .then(([{ campaign }, { recipients }, attachments]) => {
+      .then(([{ campaign, recipientStatusCounts }, { recipients }, attachments]) => {
         applyCampaign(campaign);
+        setStatusCounts(recipientStatusCounts || {});
         setRecipients(recipients);
         setAttachments(attachments);
       })
@@ -236,6 +252,129 @@ export default function EmailCampaignBuilderPage() {
     const { recipients } = await listRecipients(id, { limit: 50 });
     setRecipients(recipients);
   }, [id, isNew]);
+
+  // Live send progress: poll recipient status counts while the campaign is
+  // actively sending, and stop as soon as it lands in a terminal status.
+  useEffect(() => {
+    if (!id || isNew || campaign?.status !== "sending") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { campaign: refreshed, recipientStatusCounts } = await getCampaign(id);
+        if (cancelled) return;
+        setStatusCounts(recipientStatusCounts || {});
+        if (refreshed.status !== "sending") setCampaign(refreshed);
+      } catch {
+        // transient polling error — next tick will retry
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [id, isNew, campaign?.status]);
+
+  const progress = useMemo(() => {
+    const queued = statusCounts.pending || 0;
+    const sending = statusCounts.processing || 0;
+    const delivered = (statusCounts.sent || 0) + (statusCounts.delivered || 0) + (statusCounts.opened || 0) + (statusCounts.clicked || 0);
+    const failed = statusCounts.failed || 0;
+    const total = recipientCount || queued + sending + delivered + failed;
+    const resolved = delivered + failed;
+    const pct = total > 0 ? Math.round((resolved / total) * 100) : 0;
+    return { queued, sending, delivered, failed, total, resolved, pct };
+  }, [statusCounts, recipientCount]);
+
+  // Restore an in-progress (not-yet-added) selection cart on mount, so
+  // navigating away or reloading the page mid-search doesn't lose it.
+  useEffect(() => {
+    if (!id || isNew) return;
+    try {
+      const raw = localStorage.getItem(`email-campaign-picker-cart:${id}`);
+      if (!raw) return;
+      const parsed: RecipientSearchResult[] = JSON.parse(raw);
+      setSelectedPicks(new Map(parsed.map((r) => [r.email.toLowerCase(), r])));
+    } catch {
+      // malformed or unavailable storage — start with an empty cart
+    }
+  }, [id, isNew]);
+
+  useEffect(() => {
+    if (!id || isNew) return;
+    try {
+      localStorage.setItem(`email-campaign-picker-cart:${id}`, JSON.stringify(Array.from(selectedPicks.values())));
+    } catch {
+      // storage unavailable (private mode, quota) — cart just won't survive a reload
+    }
+  }, [id, isNew, selectedPicks]);
+
+  const existingRecipientEmails = useMemo(() => new Set(recipients.map((r) => r.email.toLowerCase())), [recipients]);
+
+  // Debounced search for the "Explicit list" multi-select picker.
+  useEffect(() => {
+    if (!pickerQuery || pickerQuery.length < 2) {
+      setPickerResults([]);
+      return;
+    }
+    setPickerSearching(true);
+    const handle = setTimeout(async () => {
+      try {
+        setPickerResults(await searchRecipients(pickerQuery));
+      } catch {
+        setPickerResults([]);
+      } finally {
+        setPickerSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [pickerQuery]);
+
+  function togglePick(r: RecipientSearchResult) {
+    setSelectedPicks((prev) => {
+      const next = new Map(prev);
+      const key = r.email.toLowerCase();
+      if (next.has(key)) next.delete(key);
+      else next.set(key, r);
+      return next;
+    });
+  }
+
+  function selectAllShown() {
+    setSelectedPicks((prev) => {
+      const next = new Map(prev);
+      for (const r of pickerResults) {
+        if (!existingRecipientEmails.has(r.email.toLowerCase())) next.set(r.email.toLowerCase(), r);
+      }
+      return next;
+    });
+  }
+
+  function removePick(key: string) {
+    setSelectedPicks((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  async function handleAddSelectedPicks() {
+    if (!id || selectedPicks.size === 0) return;
+    setAddingRecipients(true);
+    try {
+      const toAdd = Array.from(selectedPicks.values()).map((r) => ({ email: r.email, userId: r.id }));
+      const { recipientCount } = await addRecipients(id, toAdd);
+      setRecipientCount(recipientCount);
+      setSelectedPicks(new Map());
+      await refreshRecipients();
+      toast.success(`Added ${toAdd.length} recipient${toAdd.length !== 1 ? "s" : ""}`);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || "Failed to add recipients");
+    } finally {
+      setAddingRecipients(false);
+    }
+  }
 
   async function handleSave(showToast = true) {
     if (!id || isNew) return null;
@@ -549,6 +688,41 @@ export default function EmailCampaignBuilderPage() {
         </div>
       </div>
 
+      {campaign?.status === "sending" && (
+        <Card className="border-amber-200 bg-amber-50/60">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="flex items-center gap-2 font-medium text-amber-800">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending — {progress.pct}% resolved
+              </span>
+              <span className="text-muted-foreground">
+                {progress.resolved} of {progress.total}
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-amber-100">
+              <div className="h-full bg-kolekto-orange transition-all" style={{ width: `${progress.pct}%` }} />
+            </div>
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span>
+                Queued: <b className="text-slate-950">{progress.queued}</b>
+              </span>
+              <span>
+                Sending: <b className="text-slate-950">{progress.sending}</b>
+              </span>
+              <span>
+                Delivered: <b className="text-green-700">{progress.delivered}</b>
+              </span>
+              <span>
+                Failed: <b className="text-red-700">{progress.failed}</b>
+              </span>
+              <span>
+                Remaining: <b className="text-slate-950">{progress.queued + progress.sending}</b>
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="compose">
         <TabsList>
           <TabsTrigger value="compose">Compose</TabsTrigger>
@@ -644,17 +818,94 @@ export default function EmailCampaignBuilderPage() {
             <Card>
               <CardContent className="space-y-4 p-4">
                 {isEditable && (
-                  <div className="space-y-2">
-                    <Label>Add recipients (one email per line, or comma-separated)</Label>
-                    <Textarea value={recipientDraft} onChange={(e) => setRecipientDraft(e.target.value)} rows={4} placeholder="user@example.com" />
-                    <Button size="sm" onClick={handleAddRecipients} disabled={addingRecipients} className="gap-2">
-                      {addingRecipients ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      Add recipients
-                    </Button>
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label>Search people to add</Label>
+                      <Input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search by name or email…" />
+                    </div>
+
+                    {pickerQuery.length >= 2 && (
+                      <div className="rounded-md border">
+                        <div className="flex items-center justify-between border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                          <span>{pickerSearching ? "Searching…" : `${pickerResults.length} result${pickerResults.length !== 1 ? "s" : ""}`}</span>
+                          {pickerResults.length > 0 && (
+                            <button type="button" className="font-medium text-kolekto-orange hover:underline" onClick={selectAllShown}>
+                              Select all shown
+                            </button>
+                          )}
+                        </div>
+                        <div className="max-h-56 overflow-y-auto">
+                          {pickerResults.map((r) => {
+                            const key = r.email.toLowerCase();
+                            const already = existingRecipientEmails.has(key);
+                            const picked = selectedPicks.has(key);
+                            return (
+                              <label
+                                key={r.id}
+                                className={cn(
+                                  "flex items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0",
+                                  already ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-accent",
+                                )}
+                              >
+                                <Checkbox checked={picked || already} disabled={already} onCheckedChange={() => togglePick(r)} />
+                                <span className="font-medium">{r.full_name || "—"}</span>
+                                <span className="text-muted-foreground">{r.email}</span>
+                                {already && <span className="ml-auto text-xs text-muted-foreground">already added</span>}
+                              </label>
+                            );
+                          })}
+                          {!pickerSearching && pickerResults.length === 0 && (
+                            <p className="px-3 py-3 text-sm text-muted-foreground">No matches.</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedPicks.size > 0 && (
+                      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <Label className="text-xs text-muted-foreground">Selected ({selectedPicks.size}) — kept while you keep searching</Label>
+                          <Button size="sm" onClick={handleAddSelectedPicks} disabled={addingRecipients} className="gap-2">
+                            {addingRecipients ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                            Add {selectedPicks.size} to campaign
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Array.from(selectedPicks.entries()).map(([key, r]) => (
+                            <Badge key={key} variant="outline" className="gap-1.5 border-slate-200 bg-white text-slate-700">
+                              {r.email}
+                              <button type="button" onClick={() => removePick(key)} className="hover:text-destructive">
+                                <X className="h-3 w-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+                      onClick={() => setShowPasteBox((v) => !v)}
+                    >
+                      {showPasteBox ? "Hide paste box" : "Or paste a list of emails instead"}
+                    </button>
+
+                    {showPasteBox && (
+                      <div className="space-y-2">
+                        <Label>Add recipients (one email per line, or comma-separated)</Label>
+                        <Textarea value={recipientDraft} onChange={(e) => setRecipientDraft(e.target.value)} rows={4} placeholder="user@example.com" />
+                        <Button size="sm" onClick={handleAddRecipients} disabled={addingRecipients} className="gap-2">
+                          {addingRecipients ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          Add recipients
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Added to this campaign ({recipients.length})</Label>
                   {recipients.length === 0 && <p className="text-sm text-muted-foreground">No recipients added yet.</p>}
                   {recipients.map((r) => (
                     <div key={r.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
