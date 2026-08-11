@@ -19,6 +19,29 @@ export interface DashboardStats {
   totalPendingBalance: number;
   // Collection type breakdown
   collectionsByType: Record<string, number>;
+
+  // ── Historical reporting (admin platform-level only) ──────────────────
+  // Business decision (2026-08-11): platform-level admin reporting treats
+  // the 923 historical orphaned payments (deposits whose parent collection
+  // was hard-deleted before the delete-guard existed — see
+  // kolekto-be-old/database/historical_orphaned_payments_reporting_2026-08-11.sql)
+  // as historically received AND historically distributed, for these two
+  // totals ONLY. This is a reporting convention, not a ledger change: no
+  // contribution/wallet/withdrawal row is created, and
+  // totalAvailableBalance/totalPendingBalance above remain pure current-cash
+  // figures, untouched by any of this. Never derive collection- or
+  // tier-level numbers from these fields — the orphan pool has no surviving
+  // collection_id and cannot be attributed to any collection or tier.
+  historicalOrphanedCount: number;
+  historicalOrphanedGross: number;
+  /** verified paid contributions only — same figure as totalContributions */
+  verifiedProcessed: number;
+  /** verified paid contributions + historical orphaned gross */
+  adminTotalProcessed: number;
+  /** verified approved/successful withdrawals only — same figure as approvedWithdrawals */
+  verifiedWithdrawn: number;
+  /** verified withdrawals + historical orphaned gross (treated-as-distributed policy) */
+  adminTotalWithdrawn: number;
 }
 
 export interface Transaction {
@@ -101,6 +124,12 @@ function buildQueries() {
       query: supabase.from("kyc_verifications").select("*", { count: "exact", head: true }).eq("status", "pending"),
     },
     { label: "Total KYC submissions", query: supabase.from("kyc_verifications").select("*", { count: "exact", head: true }) },
+    // Platform-wide only (see DashboardStats' historicalOrphaned* fields) —
+    // admin-gated RPC, never joined to any collection/tier. A non-admin
+    // session gets a FORBIDDEN error here, which this store treats like any
+    // other failed sub-query (falls back to 0/previous value, logged in
+    // partialErrors) rather than surfacing raw error text.
+    { label: "Historical orphaned payments", query: supabase.rpc("get_historical_orphaned_payments_summary") },
   ] as const;
 }
 
@@ -170,6 +199,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     const walletsRes = at(11);
     const pendingKycRes = at(12);
     const totalKycSubmissionsRes = at(13);
+    const historicalOrphanedRes = at(14);
 
     const totalUsers = totalUsersRes?.count ?? previousStats?.totalUsers ?? 0;
     const totalCollections = totalCollectionsRes?.count ?? previousStats?.totalCollections ?? 0;
@@ -213,6 +243,34 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       ? Math.max(0, totalLedgerBalance - totalAvailableBalance)
       : previousStats?.totalPendingBalance ?? 0;
 
+    // Historical orphaned payments — platform-level only (see DashboardStats
+    // doc comment). RPC returns RETURNS TABLE as a one-row array; a failed/
+    // forbidden call falls back to the previous value like every other
+    // metric here, never to a silent 0 that would understate a real prior
+    // reading.
+    const historicalOrphanedRow = (historicalOrphanedRes?.data as
+      | { orphan_count: number; orphan_gross: number | string }[]
+      | null)?.[0];
+    const historicalOrphanedCount =
+      historicalOrphanedRow?.orphan_count ?? previousStats?.historicalOrphanedCount ?? 0;
+    const historicalOrphanedGross = historicalOrphanedRow
+      ? Number(historicalOrphanedRow.orphan_gross)
+      : previousStats?.historicalOrphanedGross ?? 0;
+
+    const verifiedProcessed = totalContributions;
+    const verifiedWithdrawn = approvedWithdrawals;
+    // Only well-defined once both terms are freshly loaded this pass — if
+    // either sub-query failed, fall back to the previous combined total
+    // rather than combining a fresh number with a stale one silently.
+    const adminTotalProcessed =
+      contributionsRes && historicalOrphanedRes
+        ? verifiedProcessed + historicalOrphanedGross
+        : previousStats?.adminTotalProcessed ?? verifiedProcessed;
+    const adminTotalWithdrawn =
+      withdrawalsRes && historicalOrphanedRes
+        ? verifiedWithdrawn + historicalOrphanedGross
+        : previousStats?.adminTotalWithdrawn ?? verifiedWithdrawn;
+
     const stats: DashboardStats = {
       totalUsers,
       totalCollections,
@@ -230,6 +288,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       totalLedgerBalance,
       totalPendingBalance,
       collectionsByType,
+      historicalOrphanedCount,
+      historicalOrphanedGross,
+      verifiedProcessed,
+      adminTotalProcessed,
+      verifiedWithdrawn,
+      adminTotalWithdrawn,
     };
 
     // Recent-transactions widget: keep the previous list on a failed fetch

@@ -95,7 +95,7 @@ const Dashboard = () => {
             <StatsCard
               title="Total Contributions"
               value={formatCurrency(stats.totalContributions)}
-              description="Sum of successful payments"
+              description="Sum of successful payments (verified)"
               icon="coins"
               trend="up"
               trendValue="8%"
@@ -106,6 +106,20 @@ const Dashboard = () => {
               description="All-time withdrawals"
               icon="wallet"
               trend="stable"
+            />
+            <StatsCard
+              title="Total Processed"
+              value={formatCurrency(stats.adminTotalProcessed)}
+              description="All-time payment activity, including historical transactions whose original collection records are no longer available."
+              icon="coins"
+              variant="default"
+            />
+            <StatsCard
+              title="Total Distributed"
+              value={formatCurrency(stats.adminTotalWithdrawn)}
+              description="All-time distributed activity, including historical payment activity treated as distributed for reporting."
+              icon="wallet"
+              variant="default"
             />
             <StatsCard
               title="Approved Withdrawals"
@@ -161,16 +175,16 @@ const Dashboard = () => {
             />
 
             <StatsCard
-              title="Total Available Balance"
+              title="Current Available Balance"
               value={formatCurrency(stats.totalLedgerBalance)}
-              description="Platform-wide ledger balance"
+              description="Funds currently available according to Kolekto's live financial ledger."
               icon="wallet"
               variant="default"
             />
             <StatsCard
-              title="Total Available for Withdrawal"
+              title="Currently Withdrawable"
               value={formatCurrency(stats.totalAvailableBalance)}
-              description="Settled and ready to withdraw"
+              description="Funds currently eligible for withdrawal according to Kolekto's withdrawal rules."
               icon="check"
               variant="success"
             />
