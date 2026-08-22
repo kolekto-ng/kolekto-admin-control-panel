@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
+import { axiosInstance } from "@/lib/axios";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -312,35 +313,16 @@ export const useKYCStore = create<KYCState>((set, get) => ({
   },
 
   // ── Approve Document ───────────────────────────────────────────────────────
+  //
+  // Routed through the backend admin API instead of writing kyc_documents /
+  // kyc_verifications directly — the admin client is read-only for these
+  // tables (RLS rejects direct writes with 403; see CLAUDE.md). The backend
+  // controller (controllers/admin/kyc.js) applies the status update, logs
+  // history, and recomputes the overall verification status server-side.
 
   approveDocument: async (documentId: string, userId: string) => {
     try {
-      // Update document status
-      const { error: docError } = await supabase
-        .from("kyc_documents")
-        .update({
-          status: "verified",
-          verified_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          rejection_reason: null,
-        })
-        .eq("id", documentId);
-
-      if (docError) throw docError;
-
-      // Re-evaluate overall verification status
-      await recalculateVerificationStatus(userId);
-
-      // Log history
-      const verification = get().selectedUser?.verification;
-      await supabase.from("kyc_verification_history").insert({
-        user_id: userId,
-        verification_id: verification?.id || null,
-        old_status: verification?.status || "pending",
-        new_status: "verified",
-        change_reason: "Document approved by admin",
-        changed_at: new Date().toISOString(),
-      });
+      await axiosInstance.post(`/adminurlabdkole/kyc-documents/${documentId}/approve`);
 
       // Refresh detail
       await get().fetchKYCDetail(userId);
@@ -350,7 +332,7 @@ export const useKYCStore = create<KYCState>((set, get) => ({
       return { success: true };
     } catch (err: any) {
       console.error("Error approving document:", err);
-      return { success: false, error: err.message };
+      return { success: false, error: err?.response?.data?.error || err.message };
     }
   },
 
@@ -358,31 +340,7 @@ export const useKYCStore = create<KYCState>((set, get) => ({
 
   rejectDocument: async (documentId: string, userId: string, reason: string) => {
     try {
-      // Update document status with rejection reason
-      const { error: docError } = await supabase
-        .from("kyc_documents")
-        .update({
-          status: "rejected",
-          rejection_reason: reason,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", documentId);
-
-      if (docError) throw docError;
-
-      // Re-evaluate overall verification status
-      await recalculateVerificationStatus(userId);
-
-      // Log history
-      const verification = get().selectedUser?.verification;
-      await supabase.from("kyc_verification_history").insert({
-        user_id: userId,
-        verification_id: verification?.id || null,
-        old_status: verification?.status || "pending",
-        new_status: "rejected",
-        change_reason: reason,
-        changed_at: new Date().toISOString(),
-      });
+      await axiosInstance.post(`/adminurlabdkole/kyc-documents/${documentId}/reject`, { reason });
 
       // Refresh
       await get().fetchKYCDetail(userId);
@@ -391,7 +349,7 @@ export const useKYCStore = create<KYCState>((set, get) => ({
       return { success: true };
     } catch (err: any) {
       console.error("Error rejecting document:", err);
-      return { success: false, error: err.message };
+      return { success: false, error: err?.response?.data?.error || err.message };
     }
   },
 
@@ -399,25 +357,11 @@ export const useKYCStore = create<KYCState>((set, get) => ({
 
   approveNIN: async (userId: string) => {
     try {
-      const { error } = await supabase
-        .from("kyc_verifications")
-        .update({ nin_verified: true, updated_at: new Date().toISOString() })
-        .eq("user_id", userId);
+      const verificationId = get().selectedUser?.verification?.id;
+      if (!verificationId) throw new Error("No KYC verification found for this user");
 
-      if (error) throw error;
-
-      // Re-evaluate overall verification status (may now be "verified" if docs also approved)
-      await recalculateVerificationStatus(userId);
-
-      // Log history
-      const verification = get().selectedUser?.verification;
-      await supabase.from("kyc_verification_history").insert({
-        user_id: userId,
-        verification_id: verification?.id || null,
-        old_status: verification?.status || "pending",
-        new_status: verification?.status || "pending",
-        change_reason: "NIN approved by admin",
-        changed_at: new Date().toISOString(),
+      await axiosInstance.post(`/adminurlabdkole/kyc-verifications/${verificationId}/approve`, {
+        verification_type: "nin",
       });
 
       await get().fetchKYCDetail(userId);
@@ -425,7 +369,7 @@ export const useKYCStore = create<KYCState>((set, get) => ({
       return { success: true };
     } catch (err: any) {
       console.error("Error approving NIN:", err);
-      return { success: false, error: err.message };
+      return { success: false, error: err?.response?.data?.error || err.message };
     }
   },
 
@@ -433,22 +377,12 @@ export const useKYCStore = create<KYCState>((set, get) => ({
 
   rejectNIN: async (userId: string, reason: string) => {
     try {
-      const { error } = await supabase
-        .from("kyc_verifications")
-        .update({ nin_verified: false, updated_at: new Date().toISOString() })
-        .eq("user_id", userId);
+      const verificationId = get().selectedUser?.verification?.id;
+      if (!verificationId) throw new Error("No KYC verification found for this user");
 
-      if (error) throw error;
-
-      // Log history
-      const verification = get().selectedUser?.verification;
-      await supabase.from("kyc_verification_history").insert({
-        user_id: userId,
-        verification_id: verification?.id || null,
-        old_status: verification?.status || "pending",
-        new_status: "rejected",
-        change_reason: `NIN rejected: ${reason}`,
-        changed_at: new Date().toISOString(),
+      await axiosInstance.post(`/adminurlabdkole/kyc-verifications/${verificationId}/reject`, {
+        verification_type: "nin",
+        reason,
       });
 
       await get().fetchKYCDetail(userId);
@@ -456,7 +390,7 @@ export const useKYCStore = create<KYCState>((set, get) => ({
       return { success: true };
     } catch (err: any) {
       console.error("Error rejecting NIN:", err);
-      return { success: false, error: err.message };
+      return { success: false, error: err?.response?.data?.error || err.message };
     }
   },
 
@@ -464,13 +398,8 @@ export const useKYCStore = create<KYCState>((set, get) => ({
 
   addFeedback: async (userId: string, verificationId: string, feedback: string) => {
     try {
-      await supabase.from("kyc_verification_history").insert({
-        user_id: userId,
-        verification_id: verificationId,
-        old_status: null,
-        new_status: null,
-        change_reason: feedback,
-        changed_at: new Date().toISOString(),
+      await axiosInstance.post(`/adminurlabdkole/kyc-verifications/${verificationId}/add-note`, {
+        notes: feedback,
       });
 
       // Refresh detail
@@ -479,75 +408,7 @@ export const useKYCStore = create<KYCState>((set, get) => ({
       return { success: true };
     } catch (err: any) {
       console.error("Error adding feedback:", err);
-      return { success: false, error: err.message };
+      return { success: false, error: err?.response?.data?.error || err.message };
     }
   },
 }));
-
-// ── Helper: Recalculate overall KYC verification status ────────────────────
-
-async function recalculateVerificationStatus(userId: string) {
-  // Fetch all documents via kyc_verification_id join (more efficient now that FK exists)
-  const { data: verification } = await supabase
-    .from("kyc_verifications")
-    .select("id, nin_verified, kyc_documents(document_type, status)")
-    .eq("user_id", userId)
-    .single();
-
-  if (!verification) return;
-
-  const allDocs: { document_type: string; status: string | null }[] =
-    (verification as any).kyc_documents || [];
-
-  if (allDocs.length === 0) return;
-
-  // Group by document type — verified wins
-  const typeStatusMap: Record<string, string> = {};
-  allDocs.forEach((doc) => {
-    if (doc.status === "verified") {
-      typeStatusMap[doc.document_type] = "verified";
-    } else if (!typeStatusMap[doc.document_type]) {
-      typeStatusMap[doc.document_type] = doc.status || "pending";
-    }
-  });
-
-  const identityVerified = typeStatusMap["identity"] === "verified";
-  const addressVerified = typeStatusMap["address"] === "verified";
-  const ninVerified = verification.nin_verified || false;
-
-  // Determine overall status
-  const anyRejected = allDocs.some((d) => d.status === "rejected");
-  const allRequiredVerified = identityVerified && addressVerified && ninVerified;
-
-  let overallStatus: KYCStatus = "pending";
-  if (allRequiredVerified) {
-    overallStatus = "verified";
-  } else if (anyRejected) {
-    overallStatus = "rejected";
-  } else if (allDocs.some((d) => d.status === "reviewing")) {
-    overallStatus = "reviewing";
-  }
-
-  // Update kyc_verifications
-  await supabase
-    .from("kyc_verifications")
-    .update({
-      status: overallStatus,
-      identity_verified: identityVerified,
-      address_verified: addressVerified,
-      updated_at: new Date().toISOString(),
-      ...(allRequiredVerified
-        ? { completed_at: new Date().toISOString() }
-        : { completed_at: null }),
-    })
-    .eq("user_id", userId);
-
-  await supabase
-    .from("profiles")
-    .update({
-      is_verified: overallStatus === "verified",
-      verification_status: overallStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", userId);
-}

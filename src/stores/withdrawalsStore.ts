@@ -11,10 +11,27 @@ export interface Withdrawal {
   hostEmail: string;
   requestedAmount: number;
   dateRequested: string;
-  status: "pending" | "approved" | "rejected";
+  // "pending_owner_approval": ADMIN-initiated withdrawal inside a workspace,
+  // awaiting that workspace's OWNER approval (via an endpoint this console
+  // does not call). Not actionable here — Approve/Reject only ever render
+  // for plain "pending". Do not widen the Approve/Reject gate to include it.
+  //
+  // "owner_rejected": TERMINAL. The workspace OWNER declined an
+  // ADMIN-initiated withdrawal while it was at "pending_owner_approval" — it
+  // never reached Kolekto Super Admin. Distinct from plain "rejected", which
+  // means Super Admin rejected an already owner-approved withdrawal. Also
+  // not actionable here — same as above, Approve/Reject only ever render
+  // for plain "pending".
+  status: "pending" | "pending_owner_approval" | "approved" | "rejected" | "owner_rejected";
   bankName: string;
   accountNumber: string;
   accountName: string;
+  // Optional free-text reason the workspace OWNER gave when rejecting.
+  // Only populated by fetchWithdrawalById (detail view), which selects "*"
+  // from withdrawals and so already receives this column when present.
+  // fetchWithdrawals (list view) selects an explicit column list that does
+  // not include it, so this is undefined there even for owner_rejected rows.
+  ownerRejectionReason?: string;
 }
 
 interface WithdrawalsState {
@@ -135,6 +152,7 @@ export const useWithdrawalsStore = create<WithdrawalsState>((set, get) => ({
           "Unknown Bank",
         accountNumber: w.destination_account?.accountNumber || "",
         accountName: w.destination_account?.accountName || "",
+        ownerRejectionReason: w.owner_rejection_reason || undefined,
       };
 
       set({ selectedWithdrawal: formatted, detailLoading: false });

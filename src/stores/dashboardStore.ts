@@ -1,5 +1,12 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+import {
+  isCompletedWithdrawal,
+  withdrawalStatusBucket,
+  withdrawalStatusLabel,
+  PENDING_WITHDRAWAL_STATUSES,
+} from "@/lib/withdrawalStatus";
 
 export interface DashboardStats {
   totalUsers: number;
@@ -51,6 +58,15 @@ export interface Transaction {
   description: string;
   date: string;
   status: "success" | "failed" | "flagged" | "pending";
+  /**
+   * Precise operator-facing label for `status` (wave 6.7F.8).
+   *
+   * `status` is a three-way colour bucket and cannot distinguish "Rejected by
+   * Super Admin" from "Rejected by Workspace Owner", or a Super Admin queue
+   * item from one still awaiting the workspace OWNER. The renderer prefers
+   * this when present and falls back to capitalising `status`.
+   */
+  statusLabel?: string;
   user: string;
   collection: string;
 }
@@ -79,15 +95,115 @@ interface DashboardState {
 // which is exactly the failure mode that hid the RLS/GRANT bugs fixed
 // earlier in the admin-panel remediation. Every entry here is now checked
 // for BOTH promise rejection AND a populated `.error` field.
+/**
+ * Read EVERY row of a projection, page by page (wave 6.7F.8).
+ *
+ * ── THE BUG THIS FIXES ───────────────────────────────────────────────────────
+ * The dashboard sums money client-side: paid contributions, withdrawal amounts
+ * and wallet balances. Each was read with a single unpaginated
+ * `.select("amount")`. PostgREST caps such a read at `db.max_rows` (1,000 by
+ * default) and truncates SILENTLY — no error, no flag, just fewer rows. Past
+ * that point every one of those totals under-reports, and the console shows a
+ * confident, wrong number. On a financial admin surface that is the worst
+ * possible failure shape: quiet and plausible.
+ *
+ * ── WHY NOT AN AGGREGATE RPC ─────────────────────────────────────────────────
+ * `sum()` in SQL would be one round-trip instead of N. It was rejected for this
+ * wave for two reasons:
+ *   1. Kolekto's balance math is ALREADY implemented three times (Node in
+ *      utils/financial.js, Deno in the edge functions, SQL in the atomic
+ *      withdrawal RPCs) and that duplication is a known, documented source of
+ *      drift. A fourth implementation — in a place nothing else validates —
+ *      buys a round-trip and costs a reconciliation risk.
+ *   2. It needs a migration. This wave is explicitly pre-migration.
+ * Pagination keeps the EXACT same arithmetic on the EXACT same rows; only the
+ * row set becomes complete. Nothing about the money model changes.
+ *
+ * ── HONESTY BOUND ────────────────────────────────────────────────────────────
+ * Paging is bounded at MAX_ROWS. If a table ever exceeds it the result carries
+ * `truncated: true` so the caller can SAY the figure is a floor rather than
+ * presenting it as exact. Never silently truncate a financial total — that is
+ * the very bug being fixed here.
+ *
+ * The correct long-term answer is a server-side aggregate on the backend, using
+ * the existing Node financial engine rather than new SQL. Recorded in the wave
+ * report as the follow-up.
+ */
+const PAGE_SIZE = 1000;
+const MAX_ROWS = 100_000;
+
+export interface PagedResult<T> {
+  data: T[] | null;
+  error: { message?: string } | null;
+  truncated: boolean;
+}
+
+/**
+ * The table names the generated schema actually knows about, so a literal typo
+ * at a call site is a compile error rather than a runtime 404.
+ *
+ * Taken from `Database` directly, NOT from `Parameters<typeof supabase.from>`:
+ * `from` is overloaded and its final overload takes `never`, so the
+ * `Parameters<>` form resolves to `never` and rejects every real table name.
+ */
+type KnownTable = keyof Database["public"]["Tables"];
+
+async function fetchAllRows<T = any>(
+  table: KnownTable,
+  columns: string,
+  filter?: (q: any) => any,
+): Promise<PagedResult<T>> {
+  const rows: T[] = [];
+  let from = 0;
+  for (;;) {
+    let q: any = supabase.from(table).select(columns).range(from, from + PAGE_SIZE - 1);
+    if (filter) q = filter(q);
+    const { data, error } = await q;
+    // Surface the error in the same `{ data, error }` shape every other entry
+    // in buildQueries() produces, so the existing per-query error handling
+    // (which checks BOTH rejection and `.error`) keeps working unchanged.
+    if (error) return { data: null, error, truncated: false };
+    const page = (data ?? []) as T[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return { data: rows, error: null, truncated: false };
+    if (rows.length >= MAX_ROWS) return { data: rows, error: null, truncated: true };
+    from += PAGE_SIZE;
+  }
+}
+
 function buildQueries() {
   return [
     { label: "Total users", query: supabase.from("profiles").select("*", { count: "exact", head: true }) },
     { label: "Total collections", query: supabase.from("collections").select("*", { count: "exact", head: true }) },
-    { label: "Contributions total", query: supabase.from("contributions").select("amount").eq("status", "paid") },
-    { label: "Withdrawals total", query: supabase.from("withdrawals").select("amount, status") },
+    // ⚠️ ROW-CAP (wave 6.7F.8). These two entries fetch ROWS and sum them in
+    // the browser. PostgREST caps an unpaginated read at `db.max_rows` (1,000
+    // by default) and does so SILENTLY — no error, just fewer rows — so above
+    // that threshold both totals quietly under-report money with nothing on
+    // screen to indicate it.
+    //
+    // The QUERIES here are unchanged, but they are now issued through
+    // `fetchAllRows` (see below), which walks the full set with explicit
+    // .range() pages instead of relying on a single capped read.
+    //
+    // TEST cannot demonstrate the truncation today — its largest table is 199
+    // rows — which is exactly why this needed fixing on principle rather than
+    // after an incident: the first time it bites is in production, silently.
     {
+      label: "Contributions total",
+      query: fetchAllRows("contributions", "amount", (q) => q.eq("status", "paid")),
+    },
+    { label: "Withdrawals total", query: fetchAllRows("withdrawals", "amount, status") },
+    {
+      // Wave 6.7F.8 — was `.eq("status","pending")`, which EXCLUDED
+      // `pending_owner_approval`. Those withdrawals are equally un-actioned;
+      // omitting them made the operator's "pending" KPI under-report the real
+      // queue (4 such rows on TEST were invisible to this count). Both stages
+      // are awaiting a human decision, so both belong in the figure.
       label: "Pending withdrawals",
-      query: supabase.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      query: supabase
+        .from("withdrawals")
+        .select("*", { count: "exact", head: true })
+        .in("status", PENDING_WITHDRAWAL_STATUSES),
     },
     { label: "Total campaigns", query: supabase.from("campaigns").select("*", { count: "exact", head: true }) },
     {
@@ -118,7 +234,9 @@ function buildQueries() {
         .order("created_at", { ascending: false })
         .limit(10),
     },
-    { label: "Wallet balances", query: supabase.from("wallets").select("available_balance, ledger_balance") },
+    // Same row-cap reasoning as the two totals above — this one is summed into
+    // the platform "total balance" figures.
+    { label: "Wallet balances", query: fetchAllRows("wallets", "available_balance, ledger_balance") },
     {
       label: "Pending KYC",
       query: supabase.from("kyc_verifications").select("*", { count: "exact", head: true }).eq("status", "pending"),
@@ -220,9 +338,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     const withdrawalsData = withdrawalsRes?.data as { amount: number; status: string }[] | null;
     const totalWithdrawals =
       withdrawalsData?.reduce((sum, w) => sum + w.amount, 0) ?? previousStats?.totalWithdrawals ?? 0;
+    // Wave 6.7F.8 — was `status === "approved" || status === "success"`, which
+    // missed `completed` / `successful` / `processed`. The backend's financial
+    // engine (utils/financial.js#computeWalletBalances) treats all of those as
+    // paid out, so this figure could under-report money that had genuinely
+    // left the wallet. isCompletedWithdrawal() is the same set.
     const approvedWithdrawals =
       withdrawalsData
-        ?.filter((w) => w.status === "approved" || w.status === "success")
+        ?.filter((w) => isCompletedWithdrawal(w.status))
         ?.reduce((sum, w) => sum + w.amount, 0) ?? previousStats?.approvedWithdrawals ?? 0;
 
     const collectionTypeData = collectionTypeRes?.data as { collection_type?: string; type?: string }[] | null;
@@ -320,12 +443,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
               type: "withdrawal" as const,
               description: `Withdrawal from ${withdrawal.collections?.title || "Unknown Collection"}`,
               date: withdrawal.created_at,
-              status:
-                withdrawal.status === "approved" || withdrawal.status === "success"
-                  ? ("success" as const)
-                  : withdrawal.status === "rejected"
-                  ? ("failed" as const)
-                  : ("pending" as const),
+              // Wave 6.7F.8 — was an inline
+              //   approved|success -> success, rejected -> failed, else pending
+              // ternary. That `else` rendered `owner_rejected` (TERMINAL — the
+              // workspace OWNER declined it) as **Pending** on the admin
+              // dashboard, and it missed the legacy completed/successful/
+              // processed payout statuses. See lib/withdrawalStatus.ts.
+              status: withdrawalStatusBucket(withdrawal.status),
+              statusLabel: withdrawalStatusLabel(withdrawal.status),
               user: "Organizer",
               collection: withdrawal.collections?.title || "Unknown Collection",
             })),

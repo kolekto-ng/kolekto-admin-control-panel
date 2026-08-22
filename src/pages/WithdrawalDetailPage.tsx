@@ -30,11 +30,15 @@ const WithdrawalDetailPage = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Pending</Badge>;
+        return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Awaiting Super Admin Approval</Badge>;
+      case 'pending_owner_approval':
+        return <Badge variant="outline" className="bg-purple-100 text-purple-800">Awaiting Workspace Owner Approval</Badge>;
       case 'approved':
         return <Badge variant="outline" className="bg-status-success/15 text-status-success">Approved</Badge>;
       case 'rejected':
-        return <Badge variant="outline" className="bg-status-error/15 text-status-error">Rejected</Badge>;
+        return <Badge variant="outline" className="bg-status-error/15 text-status-error">Rejected by Super Admin</Badge>;
+      case 'owner_rejected':
+        return <Badge variant="outline" className="bg-orange-100 text-orange-800">Rejected by Workspace Owner</Badge>;
       default:
         return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">{status}</Badge>;
     }
@@ -236,6 +240,36 @@ const WithdrawalDetailPage = () => {
               <div className="bg-status-pending/5 border border-status-pending/20 rounded-md p-4">
                 <div className="font-medium text-status-pending">Action Required</div>
                 <div className="text-sm mt-1">This withdrawal request is awaiting your review and approval.</div>
+              </div>
+            )}
+
+            {withdrawal.status === 'pending_owner_approval' && (
+              <div className="bg-purple-50 border border-purple-200 rounded-md p-4">
+                <div className="font-medium text-purple-800">Awaiting Workspace Owner Approval</div>
+                <div className="text-sm mt-1">
+                  This withdrawal was initiated by a workspace admin for{' '}
+                  <span className="font-medium">{withdrawal.collectionName}</span> and must first be
+                  approved by that workspace's owner. No action is available here yet — once the
+                  workspace owner approves it, the request will move to "Awaiting Super Admin Approval"
+                  and Approve/Reject will become available.
+                </div>
+              </div>
+            )}
+
+            {withdrawal.status === 'owner_rejected' && (
+              <div className="bg-orange-50 border border-orange-200 rounded-md p-4">
+                <div className="font-medium text-orange-800">Rejected by Workspace Owner</div>
+                <div className="text-sm mt-1">
+                  This withdrawal was initiated by a workspace admin for{' '}
+                  <span className="font-medium">{withdrawal.collectionName}</span> and was declined by
+                  that workspace's owner before it ever reached Kolekto Super Admin. This is separate
+                  from a Super Admin rejection and requires no action here.
+                </div>
+                {withdrawal.ownerRejectionReason && (
+                  <div className="text-sm mt-2">
+                    <strong>Owner's reason:</strong> {withdrawal.ownerRejectionReason}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

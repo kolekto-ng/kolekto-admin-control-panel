@@ -143,11 +143,15 @@ const WithdrawalsPage = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Pending</Badge>;
+        return <Badge variant="outline" className="bg-status-pending/15 text-status-pending">Awaiting Super Admin Approval</Badge>;
+      case 'pending_owner_approval':
+        return <Badge variant="outline" className="bg-purple-100 text-purple-800">Awaiting Workspace Owner Approval</Badge>;
       case 'approved':
         return <Badge variant="outline" className="bg-status-success/15 text-status-success">Approved</Badge>;
       case 'rejected':
-        return <Badge variant="outline" className="bg-status-error/15 text-status-error">Rejected</Badge>;
+        return <Badge variant="outline" className="bg-status-error/15 text-status-error">Rejected by Super Admin</Badge>;
+      case 'owner_rejected':
+        return <Badge variant="outline" className="bg-orange-100 text-orange-800">Rejected by Workspace Owner</Badge>;
       default:
         return <Badge variant="outline" className="bg-muted/80 text-muted-foreground">{status}</Badge>;
     }
