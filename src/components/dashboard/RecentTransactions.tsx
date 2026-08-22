@@ -50,8 +50,13 @@ export const RecentTransactions = ({ transactions }: RecentTransactionsProps) =>
               </td>
               <td>{formatCurrency(transaction.amount)}</td>
               <td>
+                {/* Wave 6.7F.8 — `status` is only a three-way colour bucket.
+                    Prefer the precise label when the producer supplied one, so
+                    a workspace-stage withdrawal reads as "Rejected by Workspace
+                    Owner" rather than the bucket word "Failed". */}
                 <Badge variant="outline" className={cn("status-badge", getStatusColor(transaction.status))}>
-                  {transaction.status.charAt(0).toUpperCase() + transaction.status.slice(1)}
+                  {transaction.statusLabel
+                    ?? transaction.status.charAt(0).toUpperCase() + transaction.status.slice(1)}
                 </Badge>
               </td>
               <td>{transaction.user}</td>

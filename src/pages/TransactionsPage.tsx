@@ -4,6 +4,7 @@ import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { supabase } from "@/integrations/supabase/client";
 import { Transaction } from "@/stores/dashboardStore";
+import { withdrawalStatusBucket, withdrawalStatusLabel } from "@/lib/withdrawalStatus";
 import { DateRange } from "react-day-picker";
 import { startOfDay, endOfDay } from "date-fns";
 import { Loader2, ArrowLeft } from "lucide-react";
@@ -103,12 +104,11 @@ const TransactionsPage = () => {
                     description: `Withdrawal from ${withdrawal.collections?.title || "Unknown Collection"
                         }`,
                     date: withdrawal.created_at,
-                    status:
-                        withdrawal.status === "approved"
-                            ? ("success" as const)
-                            : withdrawal.status === "rejected"
-                                ? ("failed" as const)
-                                : ("pending" as const),
+                    // Wave 6.7F.8 — see lib/withdrawalStatus.ts. The previous
+                    // ternary rendered `owner_rejected` (TERMINAL) as
+                    // "Pending", and recognised only `approved` as paid out.
+                    status: withdrawalStatusBucket(withdrawal.status),
+                    statusLabel: withdrawalStatusLabel(withdrawal.status),
                     user: "Organizer",
                     collection: withdrawal.collections?.title || "Unknown Collection",
                 })),
