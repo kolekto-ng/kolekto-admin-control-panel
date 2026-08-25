@@ -1,0 +1,125 @@
+/*
+ * editor-content.css — the editing surface's typography.
+ *
+ * These declarations deliberately MIRROR the email wrapper in
+ * kolekto-be-old/templates/email/baseCampaignTemplate.js (the CAMPAIGN_BODY_CSS
+ * block, which juice inlines into every campaign before sending). Keep the two
+ * in sync: if a value changes here it must change there, and vice versa.
+ *
+ * Why this replaces Tailwind's `prose`:
+ *
+ * `prose` is a reading-typography preset for web pages. It sets its own font
+ * sizes, margins, list indents and heading scale, none of which the email
+ * shares — so the editor showed one layout and the delivered email rendered
+ * another. Worse, for anything `prose` does NOT set (text-align chief among
+ * them) both surfaces silently fell through to *different* browser/mail-client
+ * defaults, which is what made alignment look wrong and unpredictable.
+ *
+ * Pinning both surfaces to the same explicit values is the actual fix: nothing
+ * is left to a default, so what the admin types is what the recipient sees.
+ */
+
+.kolekto-email-editor {
+  /* Matches the <td> the campaign body is rendered into. */
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.65;
+  color: #1f2937;
+  text-align: left;
+  word-break: break-word;
+}
+
+.kolekto-email-editor:focus {
+  outline: none;
+}
+
+/* Block spacing. Email clients apply their own <p> margins (Outlook's differ
+ * from Gmail's); the template inlines these same values so the client default
+ * never gets a say. */
+.kolekto-email-editor p {
+  margin: 0 0 16px 0;
+}
+
+.kolekto-email-editor p:last-child {
+  margin-bottom: 0;
+}
+
+.kolekto-email-editor h1,
+.kolekto-email-editor h2,
+.kolekto-email-editor h3 {
+  margin: 24px 0 12px 0;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #111827;
+}
+
+.kolekto-email-editor h1:first-child,
+.kolekto-email-editor h2:first-child,
+.kolekto-email-editor h3:first-child {
+  margin-top: 0;
+}
+
+.kolekto-email-editor h1 { font-size: 26px; }
+.kolekto-email-editor h2 { font-size: 21px; }
+.kolekto-email-editor h3 { font-size: 17px; }
+
+.kolekto-email-editor ul,
+.kolekto-email-editor ol {
+  margin: 0 0 16px 0;
+  padding-left: 24px;
+}
+
+.kolekto-email-editor li {
+  margin: 0 0 6px 0;
+}
+
+/* list-style-position must stay `outside` for a centred list to look right:
+ * with `inside` the marker joins the centred text run and the bullets stagger. */
+.kolekto-email-editor ul { list-style: disc outside; }
+.kolekto-email-editor ol { list-style: decimal outside; }
+
+.kolekto-email-editor a {
+  color: #1B5E20;
+  text-decoration: underline;
+}
+
+.kolekto-email-editor blockquote {
+  margin: 0 0 16px 0;
+  padding: 4px 0 4px 16px;
+  border-left: 3px solid #e5e7eb;
+  color: #4b5563;
+}
+
+.kolekto-email-editor hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 24px 0;
+}
+
+.kolekto-email-editor img {
+  max-width: 100%;
+  height: auto;
+}
+
+.kolekto-email-editor table {
+  border-collapse: collapse;
+  margin: 0 0 16px 0;
+  width: 100%;
+}
+
+.kolekto-email-editor th,
+.kolekto-email-editor td {
+  border: 1px solid #e5e7eb;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.kolekto-email-editor th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+/* ProseMirror's own selection/placeholder affordances. */
+.kolekto-email-editor .ProseMirror-selectednode {
+  outline: 2px solid #F6A623;
+}

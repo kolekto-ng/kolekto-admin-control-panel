@@ -1,193 +1,123 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
-import { supabase } from "@/integrations/supabase/client";
-import { Transaction } from "@/stores/dashboardStore";
 import { DateRange } from "react-day-picker";
 import { startOfDay, endOfDay } from "date-fns";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import { useTransactionsList } from "@/features/transactions/queries";
+import { useListParams } from "@/hooks/useListParams";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { TableSkeleton, RefreshingIndicator } from "@/components/ui/table-skeleton";
 import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
+    Pagination,
+    PaginationContent,
+    PaginationEllipsis,
+    PaginationItem,
+    PaginationLink,
+    PaginationNext,
+    PaginationPrevious,
 } from "@/components/ui/pagination";
 
+const ITEMS_PER_PAGE = 10;
+
+const DEFAULT_FILTERS = { from: "", to: "", type: "all", status: "all" };
+
 const TransactionsPage = () => {
-    const [date, setDate] = useState<DateRange | undefined>();
-    const [transactions, setTransactions] = useState<Transaction[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [currentPage, setCurrentPage] = useState(1);
-    const ITEMS_PER_PAGE = 10;
+    const { filters, page, setFilters, setPage } = useListParams(DEFAULT_FILTERS);
 
-    const fetchTransactions = useCallback(async () => {
-        setLoading(true);
-        try {
-            let contributionsQuery = supabase
-                .from("contributions")
-                .select(
-                    `
-            id, amount, created_at, status, name,
-            collections(title)
-          `
-                )
-                .order("created_at", { ascending: false });
+    // The date range round-trips through the URL as two ISO instants, so a
+    // filtered view survives Back, reload and sharing. The picker itself works
+    // in Date objects, hence the conversion at the boundary.
+    const dateRange = useMemo<DateRange | undefined>(() => {
+        if (!filters.from) return undefined;
+        const from = new Date(filters.from);
+        if (Number.isNaN(from.getTime())) return undefined;
+        const to = filters.to ? new Date(filters.to) : undefined;
+        return { from, to: to && !Number.isNaN(to.getTime()) ? to : undefined };
+    }, [filters.from, filters.to]);
 
-            let withdrawalsQuery = supabase
-                .from("withdrawals")
-                .select(
-                    `
-            id, amount, created_at, status, user_id,
-            collections(title)
-          `
-                )
-                .order("created_at", { ascending: false });
-
-            if (date?.from) {
-                const startDate = startOfDay(date.from).toISOString();
-                const endDate = endOfDay(date.to || date.from).toISOString();
-
-                contributionsQuery = contributionsQuery
-                    .gte("created_at", startDate)
-                    .lte("created_at", endDate);
-
-                withdrawalsQuery = withdrawalsQuery
-                    .gte("created_at", startDate)
-                    .lte("created_at", endDate);
+    const setDateRange = useCallback(
+        (range: DateRange | undefined) => {
+            if (!range?.from) {
+                setFilters({ from: "", to: "" });
+                return;
             }
+            setFilters({
+                from: startOfDay(range.from).toISOString(),
+                to: endOfDay(range.to || range.from).toISOString(),
+            });
+        },
+        [setFilters],
+    );
 
-            console.log('Fetching transactions with date:', date);
+    const { data, isPending, isFetching } = useTransactionsList({
+        page,
+        pageSize: ITEMS_PER_PAGE,
+        from: filters.from || null,
+        to: filters.to || null,
+        type: filters.type,
+        status: filters.status,
+    });
 
-            const [contributionsResponse, withdrawalsResponse] = await Promise.all([
-                contributionsQuery,
-                withdrawalsQuery,
-            ]);
+    const transactions = data?.rows ?? [];
+    const total = data?.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / ITEMS_PER_PAGE));
+    const startIndex = (page - 1) * ITEMS_PER_PAGE;
 
-            console.log('Contributions data:', contributionsResponse.data);
-            console.log('Contributions error:', contributionsResponse.error);
-            console.log('Withdrawals data:', withdrawalsResponse.data);
-            console.log('Withdrawals error:', withdrawalsResponse.error);
-
-            if (contributionsResponse.error) throw contributionsResponse.error;
-            if (withdrawalsResponse.error) throw withdrawalsResponse.error;
-
-            const recentContributions = contributionsResponse.data || [];
-            const recentWithdrawals = withdrawalsResponse.data || [];
-
-            // Create transactions array from contributions and withdrawals
-            const allTransactions: Transaction[] = [
-                ...recentContributions.map((contribution: any) => ({
-                    id: contribution.id,
-                    amount: contribution.amount,
-                    type: "contribution" as const,
-                    description: `Contribution to ${contribution.collections?.title || "Unknown Collection"
-                        }`,
-                    date: contribution.created_at,
-                    status:
-                        contribution.status === "paid"
-                            ? ("success" as const)
-                            : ("pending" as const),
-                    user: contribution.name || "Anonymous",
-                    collection: contribution.collections?.title || "Unknown Collection",
-                })),
-                ...recentWithdrawals.map((withdrawal: any) => ({
-                    id: withdrawal.id,
-                    amount: withdrawal.amount,
-                    type: "withdrawal" as const,
-                    description: `Withdrawal from ${withdrawal.collections?.title || "Unknown Collection"
-                        }`,
-                    date: withdrawal.created_at,
-                    status:
-                        withdrawal.status === "approved"
-                            ? ("success" as const)
-                            : withdrawal.status === "rejected"
-                                ? ("failed" as const)
-                                : ("pending" as const),
-                    user: "Organizer",
-                    collection: withdrawal.collections?.title || "Unknown Collection",
-                })),
-            ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-            setTransactions(allTransactions);
-            setCurrentPage(1);
-        } catch (error) {
-            console.error("Error fetching transactions:", error);
-        } finally {
-            setLoading(false);
-        }
-    }, [date]);
+    useScrollRestoration(!isPending);
 
     useEffect(() => {
-        fetchTransactions();
-    }, [fetchTransactions]);
-
-    const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = startIndex + ITEMS_PER_PAGE;
-    const paginatedTransactions = transactions.slice(startIndex, endIndex);
+        if (!isPending && page > totalPages) setPage(totalPages);
+    }, [isPending, page, totalPages, setPage]);
 
     const renderPageNumbers = () => {
-        const pages = [];
+        const pages: (number | string)[] = [];
         const maxVisiblePages = 5;
 
         if (totalPages <= maxVisiblePages) {
-            for (let i = 1; i <= totalPages; i++) {
-                pages.push(i);
-            }
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
         } else {
             pages.push(1);
-
-            let start = Math.max(2, currentPage - 1);
-            let end = Math.min(totalPages - 1, currentPage + 1);
-
-            if (currentPage <= 3) {
-                end = 4;
-            } else if (currentPage >= totalPages - 2) {
-                start = totalPages - 3;
-            }
-
-            if (start > 2) {
-                pages.push('ellipsis1');
-            }
-
-            for (let i = start; i <= end; i++) {
-                pages.push(i);
-            }
-
-            if (end < totalPages - 1) {
-                pages.push('ellipsis2');
-            }
-
+            let start = Math.max(2, page - 1);
+            let end = Math.min(totalPages - 1, page + 1);
+            if (page <= 3) end = 4;
+            else if (page >= totalPages - 2) start = totalPages - 3;
+            if (start > 2) pages.push("ellipsis1");
+            for (let i = start; i <= end; i++) pages.push(i);
+            if (end < totalPages - 1) pages.push("ellipsis2");
             pages.push(totalPages);
         }
 
-        return pages.map((page, index) => {
-            if (page === 'ellipsis1' || page === 'ellipsis2') {
+        return pages.map((p, index) => {
+            if (typeof p === "string") {
                 return (
-                    <PaginationItem key={`ellipsis-${index}`}>
+                    <PaginationItem key={`${p}-${index}`}>
                         <PaginationEllipsis />
                     </PaginationItem>
                 );
             }
-
             return (
-                <PaginationItem key={page}>
+                <PaginationItem key={p}>
                     <PaginationLink
                         href="#"
                         onClick={(e) => {
                             e.preventDefault();
-                            setCurrentPage(page as number);
+                            setPage(p);
                         }}
-                        isActive={currentPage === page}
+                        isActive={page === p}
                         className="cursor-pointer"
                     >
-                        {page}
+                        {p}
                     </PaginationLink>
                 </PaginationItem>
             );
@@ -211,31 +141,67 @@ const TransactionsPage = () => {
                             View and filter all platform transactions.
                         </p>
                     </div>
-                    <DatePickerWithRange date={date} setDate={setDate} />
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Select
+                            value={filters.type}
+                            onValueChange={(value) => setFilters({ type: value })}
+                        >
+                            <SelectTrigger className="w-[150px]">
+                                <SelectValue placeholder="Type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Types</SelectItem>
+                                <SelectItem value="contribution">Contributions</SelectItem>
+                                <SelectItem value="withdrawal">Withdrawals</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Select
+                            value={filters.status}
+                            onValueChange={(value) => setFilters({ status: value })}
+                        >
+                            <SelectTrigger className="w-[150px]">
+                                <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                <SelectItem value="success">Success</SelectItem>
+                                <SelectItem value="pending">Pending</SelectItem>
+                                <SelectItem value="failed">Failed</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <DatePickerWithRange date={dateRange} setDate={setDateRange} />
+                    </div>
                 </div>
             </div>
 
             <Card className="p-6">
-                {loading ? (
-                    <div className="flex items-center justify-center h-48">
-                        <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                        <span>Loading transactions...</span>
-                    </div>
+                {isPending ? (
+                    <TableSkeleton rows={ITEMS_PER_PAGE} columns={6} />
                 ) : (
                     <div className="space-y-4">
-                        <RecentTransactions transactions={paginatedTransactions} />
-                        {totalPages > 1 && (
-                            <div className="flex justify-center pt-4 border-t">
-                                <Pagination>
+                        <RecentTransactions transactions={transactions} />
+
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t">
+                            <p className="text-sm text-muted-foreground flex items-center gap-3">
+                                <span>
+                                    {total > 0
+                                        ? `Showing ${startIndex + 1}–${Math.min(startIndex + ITEMS_PER_PAGE, total)} of ${total} transactions`
+                                        : "No transactions found"}
+                                </span>
+                                <RefreshingIndicator show={isFetching} />
+                            </p>
+
+                            {totalPages > 1 && (
+                                <Pagination className="w-auto mx-0">
                                     <PaginationContent>
                                         <PaginationItem>
                                             <PaginationPrevious
                                                 href="#"
                                                 onClick={(e) => {
                                                     e.preventDefault();
-                                                    if (currentPage > 1) setCurrentPage(currentPage - 1);
+                                                    if (page > 1) setPage(page - 1);
                                                 }}
-                                                className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                                className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                                             />
                                         </PaginationItem>
                                         {renderPageNumbers()}
@@ -244,15 +210,15 @@ const TransactionsPage = () => {
                                                 href="#"
                                                 onClick={(e) => {
                                                     e.preventDefault();
-                                                    if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+                                                    if (page < totalPages) setPage(page + 1);
                                                 }}
-                                                className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                                className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
                                             />
                                         </PaginationItem>
                                     </PaginationContent>
                                 </Pagination>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 )}
             </Card>

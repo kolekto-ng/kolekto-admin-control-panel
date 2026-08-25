@@ -1,12 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, UserRound, CheckCircle, Clock, XCircle, ShieldOff } from 'lucide-react';
+import { Search, UserRound, CheckCircle, Clock, XCircle, ShieldOff } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatDate } from '@/lib/formatters';
-import { Link } from 'react-router-dom';
-import { useUsersStore, VerificationStatus } from '@/stores/usersStore';
+import { Link, useLocation } from 'react-router-dom';
+import { useUsersList } from '@/features/users/queries';
+import type { VerificationStatus } from '@/features/users/api';
+import { useListParams, useSearchField } from '@/hooks/useListParams';
+import { useScrollRestoration } from '@/hooks/useScrollRestoration';
+import { TableSkeleton, RefreshingIndicator } from '@/components/ui/table-skeleton';
 import {
   Select,
   SelectContent,
@@ -47,52 +51,53 @@ const VERIFICATION_CONFIG: Record<VerificationStatus, { label: string; className
   },
 };
 
+const PAGE_SIZE = 10;
+
+const DEFAULT_FILTERS = { q: '', verification: 'all' };
+
 const UsersPage = () => {
-  const { users, loading, error, fetchUsers } = useUsersStore();
-  const [filteredUsers, setFilteredUsers] = useState(users);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [verificationFilter, setVerificationFilter] = useState<string>('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
   const { toast } = useToast();
+  const location = useLocation();
+
+  // Search / filter / page live in the URL, so Back restores this exact view
+  // and the restored view maps to the cache entry that populated it.
+  const { filters, page, setFilters, setPage } = useListParams(DEFAULT_FILTERS);
+  const [searchInput, setSearchInput] = useSearchField(
+    filters.q,
+    (value) => setFilters({ q: value }),
+  );
+
+  const { data, isPending, isFetching, isError, error } = useUsersList({
+    page,
+    pageSize: PAGE_SIZE,
+    search: filters.q,
+    verification: filters.verification,
+    sortBy: 'created_at',
+    sortDir: 'desc',
+  });
+
+  const users = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useScrollRestoration(!isPending);
 
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, verificationFilter]);
-
-  useEffect(() => {
-    if (error) {
+    if (isError) {
       toast({
         title: 'Error',
-        description: error,
+        description:
+          error instanceof Error ? error.message : 'Failed to load users from database',
         variant: 'destructive',
       });
     }
-  }, [error, toast]);
+  }, [isError, error, toast]);
 
+  // A filter change can leave the admin past the end of a now-shorter result
+  // set; step back to the last real page instead of showing an empty table.
   useEffect(() => {
-    let result = users;
-
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      result = result.filter(
-        (user) =>
-          user.name.toLowerCase().includes(term) ||
-          user.email.toLowerCase().includes(term) ||
-          user.phone.includes(term)
-      );
-    }
-
-    if (verificationFilter !== 'all') {
-      result = result.filter((user) => user.verificationStatus === verificationFilter);
-    }
-
-    setFilteredUsers(result);
-  }, [searchTerm, verificationFilter, users]);
+    if (!isPending && page > totalPages) setPage(totalPages);
+  }, [isPending, page, totalPages, setPage]);
 
   const getUserStatusBadge = (status: string) => {
     switch (status) {
@@ -116,67 +121,46 @@ const UsersPage = () => {
     );
   };
 
-  const totalPages = Math.ceil(filteredUsers.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+  const startIndex = (page - 1) * PAGE_SIZE;
 
   const renderPageNumbers = () => {
-    const pages = [];
+    const pages: (number | string)[] = [];
     const maxVisiblePages = 5;
 
     if (totalPages <= maxVisiblePages) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
       pages.push(1);
-
-      let start = Math.max(2, currentPage - 1);
-      let end = Math.min(totalPages - 1, currentPage + 1);
-
-      if (currentPage <= 3) {
-        end = 4;
-      } else if (currentPage >= totalPages - 2) {
-        start = totalPages - 3;
-      }
-
-      if (start > 2) {
-        pages.push('ellipsis1');
-      }
-
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-
-      if (end < totalPages - 1) {
-        pages.push('ellipsis2');
-      }
-
+      let start = Math.max(2, page - 1);
+      let end = Math.min(totalPages - 1, page + 1);
+      if (page <= 3) end = 4;
+      else if (page >= totalPages - 2) start = totalPages - 3;
+      if (start > 2) pages.push('ellipsis1');
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (end < totalPages - 1) pages.push('ellipsis2');
       pages.push(totalPages);
     }
 
-    return pages.map((page, index) => {
-      if (page === 'ellipsis1' || page === 'ellipsis2') {
+    return pages.map((p, index) => {
+      if (typeof p === 'string') {
         return (
-          <PaginationItem key={`ellipsis-${index}`}>
+          <PaginationItem key={`${p}-${index}`}>
             <PaginationEllipsis />
           </PaginationItem>
         );
       }
-
       return (
-        <PaginationItem key={page}>
+        <PaginationItem key={p}>
           <PaginationLink
             href="#"
             onClick={(e) => {
               e.preventDefault();
-              setCurrentPage(page as number);
+              setPage(p);
             }}
-            isActive={currentPage === page}
+            isActive={page === p}
             className="cursor-pointer"
           >
-            {page}
+            {p}
           </PaginationLink>
         </PaginationItem>
       );
@@ -202,11 +186,14 @@ const UsersPage = () => {
           <Input
             placeholder="Search by name, email or phone..."
             className="pl-10"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
-        <Select value={verificationFilter} onValueChange={setVerificationFilter}>
+        <Select
+          value={filters.verification}
+          onValueChange={(value) => setFilters({ verification: value })}
+        >
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Verification Status" />
           </SelectTrigger>
@@ -222,11 +209,14 @@ const UsersPage = () => {
 
       {/* Users Table */}
       <div className="bg-white rounded-lg border shadow-sm">
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <Loader2 className="w-6 h-6 animate-spin mr-2" />
-            <span>Loading users...</span>
-          </div>
+        {/*
+          isPending means this exact view has never been loaded — the only case
+          that warrants a skeleton. Revisits and filter changes keep the previous
+          rows visible (keepPreviousData) and surface the refresh as the small
+          indicator below the table instead.
+        */}
+        {isPending ? (
+          <TableSkeleton rows={PAGE_SIZE} columns={8} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full data-table">
@@ -243,8 +233,8 @@ const UsersPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {paginatedUsers.length > 0 ? (
-                  paginatedUsers.map((user) => (
+                {users.length > 0 ? (
+                  users.map((user) => (
                     <tr key={user.id} className="hover:bg-muted/50">
                       <td className="py-3 flex items-center gap-2">
                         <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
@@ -260,7 +250,13 @@ const UsersPage = () => {
                       <td>{getUserStatusBadge(user.status)}</td>
                       <td>
                         <Button variant="ghost" size="sm" asChild>
-                          <Link to={`/users/${user.id}`}>View</Link>
+                          {/*
+                            Carry the list query string so the detail page's Back
+                            link returns to this precise view.
+                          */}
+                          <Link to={`/users/${user.id}`} state={{ from: location.search }}>
+                            View
+                          </Link>
                         </Button>
                       </td>
                     </tr>
@@ -278,11 +274,15 @@ const UsersPage = () => {
         )}
       </div>
 
-      {filteredUsers.length > 0 && (
+      {!isPending && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-          <p className="text-sm text-muted-foreground">
-            Showing {filteredUsers.length > 0 ? startIndex + 1 : 0}–{Math.min(endIndex, filteredUsers.length)} of {filteredUsers.length} users
-            {filteredUsers.length !== users.length && ` (filtered from ${users.length} total)`}
+          <p className="text-sm text-muted-foreground flex items-center gap-3">
+            <span>
+              {total > 0
+                ? `Showing ${startIndex + 1}–${Math.min(startIndex + PAGE_SIZE, total)} of ${total} users`
+                : 'No users found'}
+            </span>
+            <RefreshingIndicator show={isFetching} />
           </p>
 
           {totalPages > 1 && (
@@ -293,9 +293,9 @@ const UsersPage = () => {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      if (currentPage > 1) setCurrentPage(currentPage - 1);
+                      if (page > 1) setPage(page - 1);
                     }}
-                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    className={page === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
                   />
                 </PaginationItem>
 
@@ -306,9 +306,9 @@ const UsersPage = () => {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+                      if (page < totalPages) setPage(page + 1);
                     }}
-                    className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    className={page === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
                   />
                 </PaginationItem>
               </PaginationContent>

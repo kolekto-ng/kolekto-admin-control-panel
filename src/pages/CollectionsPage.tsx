@@ -1,13 +1,15 @@
-
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, Filter } from 'lucide-react';
+import { Search, Filter } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatDate } from '@/lib/formatters';
-import { Link } from 'react-router-dom';
-import { useCollectionsStore } from '@/stores/collectionsStore';
+import { Link, useLocation } from 'react-router-dom';
+import { useCollectionsList, useCollectionTypeCounts } from '@/features/collections/queries';
+import { useListParams, useSearchField } from '@/hooks/useListParams';
+import { useScrollRestoration } from '@/hooks/useScrollRestoration';
+import { TableSkeleton, RefreshingIndicator } from '@/components/ui/table-skeleton';
 import {
   Select,
   SelectContent,
@@ -43,61 +45,55 @@ const COLLECTION_TYPE_COLORS: Record<string, string> = {
   fundraising: 'bg-pink-100 text-pink-700 border-pink-200',
 };
 
+const PAGE_SIZE = 10;
+
+const DEFAULT_FILTERS = { q: '', status: 'all', type: 'all' };
+
 const CollectionsPage = () => {
-  const { collections, loading, error, fetchCollections } = useCollectionsStore();
-  const [filteredCollections, setFilteredCollections] = useState(collections);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
   const { toast } = useToast();
+  const location = useLocation();
+
+  const { filters, page, setFilters, setPage } = useListParams(DEFAULT_FILTERS);
+  const [searchInput, setSearchInput] = useSearchField(
+    filters.q,
+    (value) => setFilters({ q: value }),
+  );
+
+  const { data, isPending, isFetching, isError, error } = useCollectionsList({
+    page,
+    pageSize: PAGE_SIZE,
+    search: filters.q,
+    status: filters.status,
+    type: filters.type,
+    sortBy: 'created_at',
+    sortDir: 'desc',
+  });
+
+  // Whole-table aggregate for the summary pills. Separate cache entry with its
+  // own longer staleTime so paging the table does not re-run the aggregate.
+  const { data: typeCounts = {} } = useCollectionTypeCounts();
+
+  const collections = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const grandTotal = Object.values(typeCounts).reduce((a, b) => a + b, 0);
+
+  useScrollRestoration(!isPending);
 
   useEffect(() => {
-    fetchCollections();
-  }, [fetchCollections]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter, typeFilter]);
-
-  useEffect(() => {
-    if (error) {
+    if (isError) {
       toast({
         title: 'Error',
-        description: error,
+        description:
+          error instanceof Error ? error.message : 'Failed to load collections',
         variant: 'destructive',
       });
     }
-  }, [error, toast]);
+  }, [isError, error, toast]);
 
   useEffect(() => {
-    let filtered = collections || [];
-
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(collection =>
-        collection.title.toLowerCase().includes(term) ||
-        collection.organizer.toLowerCase().includes(term) ||
-        (collection.slug && collection.slug.toLowerCase().includes(term))
-      );
-    }
-
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(collection => collection.status === statusFilter);
-    }
-
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(collection => {
-        const canonicalType = (collection.collection_type && collection.collection_type !== 'fixed')
-          ? collection.collection_type
-          : (collection.type || 'fixed');
-        return canonicalType === typeFilter;
-      });
-    }
-
-    setFilteredCollections(filtered);
-  }, [searchTerm, statusFilter, typeFilter, collections]);
+    if (!isPending && page > totalPages) setPage(totalPages);
+  }, [isPending, page, totalPages, setPage]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -128,76 +124,46 @@ const CollectionsPage = () => {
     );
   };
 
-  // Count by type for summary
-  const typeCounts = collections.reduce((acc: Record<string, number>, c) => {
-    const t = (c.collection_type && c.collection_type !== 'fixed')
-      ? c.collection_type
-      : (c.type || 'fixed');
-    acc[t] = (acc[t] || 0) + 1;
-    return acc;
-  }, {});
-
-  const totalPages = Math.ceil(filteredCollections.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedCollections = filteredCollections.slice(startIndex, endIndex);
+  const startIndex = (page - 1) * PAGE_SIZE;
 
   const renderPageNumbers = () => {
-    const pages = [];
+    const pages: (number | string)[] = [];
     const maxVisiblePages = 5;
 
     if (totalPages <= maxVisiblePages) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
       pages.push(1);
-
-      let start = Math.max(2, currentPage - 1);
-      let end = Math.min(totalPages - 1, currentPage + 1);
-
-      if (currentPage <= 3) {
-        end = 4;
-      } else if (currentPage >= totalPages - 2) {
-        start = totalPages - 3;
-      }
-
-      if (start > 2) {
-        pages.push('ellipsis1');
-      }
-
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-
-      if (end < totalPages - 1) {
-        pages.push('ellipsis2');
-      }
-
+      let start = Math.max(2, page - 1);
+      let end = Math.min(totalPages - 1, page + 1);
+      if (page <= 3) end = 4;
+      else if (page >= totalPages - 2) start = totalPages - 3;
+      if (start > 2) pages.push('ellipsis1');
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (end < totalPages - 1) pages.push('ellipsis2');
       pages.push(totalPages);
     }
 
-    return pages.map((page, index) => {
-      if (page === 'ellipsis1' || page === 'ellipsis2') {
+    return pages.map((p, index) => {
+      if (typeof p === 'string') {
         return (
-          <PaginationItem key={`ellipsis-${index}`}>
+          <PaginationItem key={`${p}-${index}`}>
             <PaginationEllipsis />
           </PaginationItem>
         );
       }
-
       return (
-        <PaginationItem key={page}>
+        <PaginationItem key={p}>
           <PaginationLink
             href="#"
             onClick={(e) => {
               e.preventDefault();
-              setCurrentPage(page as number);
+              setPage(p);
             }}
-            isActive={currentPage === page}
+            isActive={page === p}
             className="cursor-pointer"
           >
-            {page}
+            {p}
           </PaginationLink>
         </PaginationItem>
       );
@@ -217,19 +183,19 @@ const CollectionsPage = () => {
       </div>
 
       {/* Type Summary Pills */}
-      {!loading && collections.length > 0 && (
+      {grandTotal > 0 && (
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setTypeFilter('all')}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${typeFilter === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            onClick={() => setFilters({ type: 'all' })}
+            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${filters.type === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
           >
-            All ({collections.length})
+            All ({grandTotal})
           </button>
           {Object.entries(typeCounts).map(([type, count]) => (
             <button
               key={type}
-              onClick={() => setTypeFilter(type)}
-              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${typeFilter === type ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              onClick={() => setFilters({ type })}
+              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${filters.type === type ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >
               {COLLECTION_TYPE_LABELS[type] || type} ({count})
             </button>
@@ -244,13 +210,13 @@ const CollectionsPage = () => {
           <Input
             placeholder="Search by title, organizer, or slug..."
             className="pl-10 w-full"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <Select value={filters.type} onValueChange={(value) => setFilters({ type: value })}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Filter by type" />
             </SelectTrigger>
@@ -263,7 +229,7 @@ const CollectionsPage = () => {
               <SelectItem value="fundraising">Fundraising</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={filters.status} onValueChange={(value) => setFilters({ status: value })}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
@@ -282,11 +248,8 @@ const CollectionsPage = () => {
 
       {/* Collections Table */}
       <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <Loader2 className="w-6 h-6 animate-spin mr-2" />
-            <span>Loading collections...</span>
-          </div>
+        {isPending ? (
+          <TableSkeleton rows={PAGE_SIZE} columns={9} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full data-table">
@@ -304,8 +267,8 @@ const CollectionsPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {paginatedCollections.length > 0 ? (
-                  paginatedCollections.map((collection) => (
+                {collections.length > 0 ? (
+                  collections.map((collection) => (
                     <tr key={collection.id} className="hover:bg-muted/50">
                       <td className="py-3 font-medium max-w-[200px]">
                         <div className="truncate">{collection.title}</div>
@@ -313,13 +276,7 @@ const CollectionsPage = () => {
                           <div className="text-xs text-muted-foreground truncate">/{collection.slug}</div>
                         )}
                       </td>
-                      <td>
-                        {getTypeBadge(
-                          (collection.collection_type && collection.collection_type !== 'fixed')
-                            ? collection.collection_type
-                            : (collection.type || 'fixed')
-                        )}
-                      </td>
+                      <td>{getTypeBadge(collection.collection_type)}</td>
                       <td>
                         <Button variant="link" className="p-0 h-auto font-normal text-foreground" asChild>
                           <Link to={`/users/${collection.userId}`}>
@@ -329,14 +286,19 @@ const CollectionsPage = () => {
                       </td>
                       <td className="font-medium">{formatCurrency(collection.raisedAmount)}</td>
                       <td className="text-muted-foreground">
-                        {collection.target_amount ? formatCurrency(collection.target_amount) : '—'}
+                        {collection.targetAmount ? formatCurrency(collection.targetAmount) : '—'}
                       </td>
                       <td>{collection.contributors}</td>
                       <td>{getStatusBadge(collection.status)}</td>
                       <td className="text-muted-foreground">{formatDate(collection.createdAt)}</td>
                       <td>
                         <Button variant="ghost" size="sm" asChild>
-                          <Link to={`/collections/${collection.id}`}>View</Link>
+                          <Link
+                            to={`/collections/${collection.id}`}
+                            state={{ from: location.search }}
+                          >
+                            View
+                          </Link>
                         </Button>
                       </td>
                     </tr>
@@ -344,7 +306,7 @@ const CollectionsPage = () => {
                 ) : (
                   <tr>
                     <td colSpan={9} className="text-center py-12 text-muted-foreground">
-                      {searchTerm || statusFilter !== 'all' || typeFilter !== 'all'
+                      {filters.q || filters.status !== 'all' || filters.type !== 'all'
                         ? 'No collections match your filters'
                         : 'No collections found'}
                     </td>
@@ -356,11 +318,15 @@ const CollectionsPage = () => {
         )}
       </div>
 
-      {filteredCollections.length > 0 && (
+      {!isPending && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-          <p className="text-sm text-muted-foreground">
-            Showing {filteredCollections.length > 0 ? startIndex + 1 : 0}–{Math.min(endIndex, filteredCollections.length)} of {filteredCollections.length} collections
-            {filteredCollections.length !== collections.length && ` (filtered from ${collections.length} total)`}
+          <p className="text-sm text-muted-foreground flex items-center gap-3">
+            <span>
+              {total > 0
+                ? `Showing ${startIndex + 1}–${Math.min(startIndex + PAGE_SIZE, total)} of ${total} collections`
+                : 'No collections found'}
+            </span>
+            <RefreshingIndicator show={isFetching} />
           </p>
 
           {totalPages > 1 && (
@@ -371,9 +337,9 @@ const CollectionsPage = () => {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      if (currentPage > 1) setCurrentPage(currentPage - 1);
+                      if (page > 1) setPage(page - 1);
                     }}
-                    className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                   />
                 </PaginationItem>
 
@@ -384,9 +350,9 @@ const CollectionsPage = () => {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+                      if (page < totalPages) setPage(page + 1);
                     }}
-                    className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
                   />
                 </PaginationItem>
               </PaginationContent>

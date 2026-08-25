@@ -8,7 +8,45 @@ import { axiosInstance } from "@/lib/axios";
 // existing admin page.
 const BASE = "/adminurlabdkole/email";
 
-export type CampaignStatus = "draft" | "scheduled" | "sending" | "sent" | "failed" | "cancelled";
+export type CampaignStatus =
+  | "draft"
+  | "scheduled"
+  | "sending"
+  | "sent"
+  // A campaign whose recipients all reached a terminal state, but with a
+  // mix of delivered and failed. Previously such a campaign reported a flat
+  // "sent", which hid partial failures from the admin entirely.
+  | "completed_with_errors"
+  | "failed"
+  | "cancelled";
+
+/**
+ * Generates an idempotency key for a single user intent.
+ *
+ * The key is minted ONCE per intent (one click of Send, one click of Send
+ * Test) and reused across every retry of that intent, which is what makes
+ * the retry safe: the server recognises the repeat and returns the original
+ * outcome instead of performing the action again. Minting a fresh key per
+ * HTTP attempt would defeat the entire mechanism.
+ */
+export function newIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function idempotentConfig(key?: string) {
+  return key ? { headers: { "Idempotency-Key": key } } : undefined;
+}
+
+/** Per-campaign delivery breakdown, resolved for a whole page in one query. */
+export interface CampaignStats {
+  total: number;
+  queued: number;
+  processing: number;
+  delivered: number;
+  retrying: number;
+  failed: number;
+}
 
 export interface EmailCampaignSummary {
   id: string;
@@ -20,6 +58,8 @@ export interface EmailCampaignSummary {
   sent_at: string | null;
   created_at: string;
   updated_at: string;
+  /** null when the summary lookup degraded — render the audience size alone. */
+  stats: CampaignStats | null;
 }
 
 export interface EmailCampaign {
@@ -127,8 +167,12 @@ export async function listCampaigns(params: { status?: string; search?: string; 
   return data;
 }
 
-export async function createCampaign(input: CampaignInput) {
-  const { data } = await axiosInstance.post<{ campaign: EmailCampaign }>(`${BASE}/campaigns`, input);
+export async function createCampaign(input: CampaignInput, idempotencyKey?: string) {
+  const { data } = await axiosInstance.post<{ campaign: EmailCampaign; idempotentReplay?: boolean }>(
+    `${BASE}/campaigns`,
+    input,
+    idempotentConfig(idempotencyKey),
+  );
   return data.campaign;
 }
 
@@ -160,6 +204,8 @@ export interface MergeTag {
   key: string;
   label: string;
   category: string;
+  /** The value the server substitutes when rendering a sample preview. */
+  sample?: string;
 }
 
 export async function listMergeTags() {
@@ -224,13 +270,62 @@ export async function downloadAudienceCsv(id: string, filters: AudienceFilters) 
 
 // ── Send actions ────────────────────────────────────────────────────────
 
-export async function sendTestEmail(id: string, testEmails: string[]) {
-  const { data } = await axiosInstance.post<{ results: { to: string; success: boolean; error?: string }[] }>(`${BASE}/campaigns/${id}/test-send`, { testEmails });
-  return data.results;
+export async function sendTestEmail(id: string, testEmails: string[], idempotencyKey?: string) {
+  const { data } = await axiosInstance.post<{
+    results: { to: string; success: boolean; error?: string }[];
+    idempotentReplay?: boolean;
+  }>(`${BASE}/campaigns/${id}/test-send`, { testEmails }, idempotentConfig(idempotencyKey));
+  return data;
 }
 
-export async function sendCampaignNow(id: string) {
-  const { data } = await axiosInstance.post<{ campaign: EmailCampaign; recipientCount: number }>(`${BASE}/campaigns/${id}/send-now`);
+export interface SendNowResult {
+  campaign: EmailCampaign;
+  recipientCount: number;
+  /** Set when the campaign was already sending — a duplicate click or a
+   * retry of a request that had in fact succeeded. Not an error. */
+  alreadyStarted?: boolean;
+}
+
+// Starting a campaign now returns as soon as the recipients are queued, but
+// resolving a large audience filter still happens inside this request, so it
+// is given a longer ceiling than the 15s global default. Under the old
+// architecture the whole SEND ran here and routinely blew that 15s — the
+// resulting "failed" toast on a campaign that was actually sending is what
+// prompted admins to click again.
+const SEND_NOW_TIMEOUT_MS = 120_000;
+
+export async function sendCampaignNow(id: string, idempotencyKey?: string) {
+  const { data } = await axiosInstance.post<SendNowResult>(
+    `${BASE}/campaigns/${id}/send-now`,
+    {},
+    { ...idempotentConfig(idempotencyKey), timeout: SEND_NOW_TIMEOUT_MS },
+  );
+  return data;
+}
+
+// ── Live progress ───────────────────────────────────────────────────────
+
+export interface CampaignProgress {
+  campaignId: string;
+  status: CampaignStatus;
+  isTerminal: boolean;
+  queued: number;
+  sending: number;
+  delivered: number;
+  /** Failed but still has delivery attempts left — in flight, not lost. */
+  retrying: number;
+  failed: number;
+  total: number;
+  remaining: number;
+  percentComplete: number;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+// Aggregate-only, fixed-size response regardless of campaign size, so this
+// is safe to poll every few seconds for the whole duration of a send.
+export async function getCampaignProgress(id: string) {
+  const { data } = await axiosInstance.get<CampaignProgress>(`${BASE}/campaigns/${id}/progress`);
   return data;
 }
 

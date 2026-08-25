@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
+import { invalidateCollection } from "@/lib/cacheInvalidation";
 import { axiosInstance } from "@/lib/axios";
 
 export type CampaignStatus =
@@ -349,6 +350,12 @@ export const useFundraisingStore = create<FundraisingState>((set, get) => ({
       });
       const updated = data?.campaign;
       if (!updated) throw new Error("Backend did not return the updated campaign");
+
+      // The backend function updates `collections` alongside `campaigns` in one
+      // transaction, so the Collections table is stale even though the admin
+      // acted from Fundraising. Scoped to collections only — Users and
+      // Transactions are unaffected and are not refetched.
+      invalidateCollection();
 
       set((s) => ({
         campaigns: s.campaigns.map((c) =>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Loader2, Save, Eye, Send, SendHorizonal, XCircle, Paperclip, Users, ArrowLeft, Download, Filter, ListPlus, X, ChevronLeft, ChevronRight, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
@@ -29,6 +29,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { sanitizeCampaignHtml, sanitizePreviewDocument } from "@/lib/sanitizeHtml";
+import { isFullHtmlDocument } from "@/lib/emailHtml";
 import { RichTextEditor } from "@/components/email/RichTextEditor";
 import { FileUpload, FileListItem } from "@/components/email/FileUpload";
 import { AudienceFilterBuilder } from "@/components/email/AudienceFilterBuilder";
@@ -51,6 +53,9 @@ import {
   previewAudience,
   downloadAudienceCsv,
   searchRecipients,
+  getCampaignProgress,
+  newIdempotencyKey,
+  type CampaignProgress,
   type EmailCampaign,
   type EmailCampaignRecipient,
   type EmailCampaignAttachment,
@@ -65,9 +70,20 @@ const STATUS_STYLES: Record<string, string> = {
   scheduled: "border-blue-200 bg-blue-50 text-blue-700",
   sending: "border-amber-200 bg-amber-50 text-amber-700",
   sent: "border-green-200 bg-green-50 text-green-700",
+  // Finished, but not cleanly — amber rather than green so a partially
+  // failed campaign cannot be mistaken for a fully delivered one at a glance.
+  completed_with_errors: "border-amber-300 bg-amber-50 text-amber-800",
   failed: "border-red-200 bg-red-50 text-red-700",
   cancelled: "border-slate-200 bg-slate-100 text-slate-500",
 };
+
+const STATUS_LABELS: Record<string, string> = {
+  completed_with_errors: "Completed with errors",
+};
+
+export function campaignStatusLabel(status: string) {
+  return STATUS_LABELS[status] || status;
+}
 
 export default function EmailCampaignBuilderPage() {
   const { id } = useParams<{ id: string }>();
@@ -98,6 +114,7 @@ export default function EmailCampaignBuilderPage() {
   const [removingRecipientId, setRemovingRecipientId] = useState<string | null>(null);
   const [recipientMode, setRecipientMode] = useState<"list" | "filter">("list");
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [liveProgress, setLiveProgress] = useState<CampaignProgress | null>(null);
 
   // Search-driven multi-select picker for "Explicit list" mode. Selections
   // accumulate in `selectedPicks` across searches (typing a new query never
@@ -135,6 +152,21 @@ export default function EmailCampaignBuilderPage() {
   const [sendingTest, setSendingTest] = useState(false);
   const [sendNowOpen, setSendNowOpen] = useState(false);
   const [sendingNow, setSendingNow] = useState(false);
+
+  // Fine-grained UI phases so the admin always knows which step is running,
+  // instead of a single spinner that could mean anything.
+  const [sendPhase, setSendPhase] = useState<"idle" | "saving" | "starting" | "started" | "failed">("idle");
+  const [testSendState, setTestSendState] = useState<"idle" | "saving" | "sending" | "sent" | "failed">("idle");
+
+  // Synchronous re-entrancy guards. React state is the wrong tool for this:
+  // setSendingNow(true) does not take effect until the next render, so two
+  // clicks in the same tick both observe the old value and both fire. Refs
+  // update immediately. This is the client half of duplicate protection —
+  // the authoritative half is the server's idempotency key.
+  const sendingNowRef = useRef(false);
+  const sendingTestRef = useRef(false);
+  const creatingRef = useRef(false);
+  const createKeyRef = useRef<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleValue, setScheduleValue] = useState("");
@@ -221,11 +253,26 @@ export default function EmailCampaignBuilderPage() {
     if (!id) return;
 
     if (isNew) {
+      // This effect can run twice for one navigation — React 18 StrictMode
+      // double-invokes effects in development, and a fast re-render can
+      // re-enter it. Each run used to POST a new campaign, so simply opening
+      // the builder could leave two "Untitled Campaign" drafts behind.
+      //
+      // Two independent protections, because they cover different cases:
+      //   - the ref stops a second run within this mounted component;
+      //   - the idempotency key, minted once and held in the ref, makes the
+      //     server collapse any duplicate that still gets through (a retry,
+      //     a remount, a lost response) onto the same campaign row.
+      if (creatingRef.current) return;
+      creatingRef.current = true;
+      if (!createKeyRef.current) createKeyRef.current = newIdempotencyKey();
+
       (async () => {
         try {
-          const created = await createCampaign({ name: "Untitled Campaign" });
+          const created = await createCampaign({ name: "Untitled Campaign" }, createKeyRef.current!);
           navigate(`/communications/campaigns/${created.id}`, { replace: true });
         } catch (error: any) {
+          creatingRef.current = false;
           toast.error(error?.response?.data?.error || "Failed to create campaign");
           navigate("/communications/campaigns");
         }
@@ -253,21 +300,37 @@ export default function EmailCampaignBuilderPage() {
     setRecipients(recipients);
   }, [id, isNew]);
 
-  // Live send progress: poll recipient status counts while the campaign is
-  // actively sending, and stop as soon as it lands in a terminal status.
+  // Live send progress. Polls the dedicated aggregate endpoint rather than
+  // re-fetching the whole campaign: its response is a fixed set of counters
+  // regardless of campaign size, so polling a 10,000-recipient send every few
+  // seconds costs the same as polling a 10-recipient one.
+  //
+  // Polling starts as soon as the campaign is sending AND keeps running for
+  // one final tick after it finishes, so the admin sees the completed totals
+  // rather than the last in-flight snapshot.
   useEffect(() => {
-    if (!id || isNew || campaign?.status !== "sending") return;
+    if (!id || isNew) return;
+    if (campaign?.status !== "sending") return;
     let cancelled = false;
+
     const poll = async () => {
       try {
-        const { campaign: refreshed, recipientStatusCounts } = await getCampaign(id);
+        const next = await getCampaignProgress(id);
         if (cancelled) return;
-        setStatusCounts(recipientStatusCounts || {});
-        if (refreshed.status !== "sending") setCampaign(refreshed);
+        setLiveProgress(next);
+        // The campaign row itself only needs re-reading when the send ends.
+        if (next.isTerminal) {
+          const { campaign: refreshed } = await getCampaign(id);
+          if (!cancelled) setCampaign(refreshed);
+        }
       } catch {
-        // transient polling error — next tick will retry
+        // Transient polling error — the next tick retries. Deliberately not
+        // surfaced as a toast: a blip in a background poller is not
+        // something the admin needs to act on, and a repeating error toast
+        // during a long send is worse than the blip.
       }
     };
+
     poll();
     const interval = setInterval(poll, 4000);
     return () => {
@@ -277,6 +340,22 @@ export default function EmailCampaignBuilderPage() {
   }, [id, isNew, campaign?.status]);
 
   const progress = useMemo(() => {
+    // Prefer live poll data; fall back to the status counts loaded with the
+    // page so the panel renders immediately instead of showing zeros for the
+    // first four seconds.
+    if (liveProgress) {
+      const resolved = liveProgress.delivered + liveProgress.failed;
+      return {
+        queued: liveProgress.queued,
+        sending: liveProgress.sending,
+        delivered: liveProgress.delivered,
+        retrying: liveProgress.retrying,
+        failed: liveProgress.failed,
+        total: liveProgress.total,
+        resolved,
+        pct: liveProgress.percentComplete,
+      };
+    }
     const queued = statusCounts.pending || 0;
     const sending = statusCounts.processing || 0;
     const delivered = (statusCounts.sent || 0) + (statusCounts.delivered || 0) + (statusCounts.opened || 0) + (statusCounts.clicked || 0);
@@ -284,8 +363,8 @@ export default function EmailCampaignBuilderPage() {
     const total = recipientCount || queued + sending + delivered + failed;
     const resolved = delivered + failed;
     const pct = total > 0 ? Math.round((resolved / total) * 100) : 0;
-    return { queued, sending, delivered, failed, total, resolved, pct };
-  }, [statusCounts, recipientCount]);
+    return { queued, sending, delivered, retrying: 0, failed, total, resolved, pct };
+  }, [liveProgress, statusCounts, recipientCount]);
 
   // Restore an in-progress (not-yet-added) selection cart on mount, so
   // navigating away or reloading the page mid-search doesn't lose it.
@@ -521,43 +600,100 @@ export default function EmailCampaignBuilderPage() {
 
   async function handleSendTest() {
     if (!id) return;
+    // Re-entrancy guard read from the ref, not from React state: state
+    // updates are asynchronous, so a second click landing in the same tick
+    // as the first would still see sendingTest === false. The ref flips
+    // synchronously, which is what actually makes a rapid double-click a
+    // single request.
+    if (sendingTestRef.current) return;
+
     const emails = testEmails.split(/[\n,]/).map((e) => e.trim()).filter(Boolean);
     if (emails.length === 0) {
       toast.error("Enter at least one test email address");
       return;
     }
-    const saved = await handleSave(false);
-    if (!saved) return;
+
+    // Claim the button BEFORE the first await. The old ordering awaited
+    // handleSave() first and only then set the flag, leaving the button live
+    // for the whole save round-trip — the exact window an impatient admin
+    // clicks through.
+    sendingTestRef.current = true;
     setSendingTest(true);
+    setTestSendState("saving");
+
+    // One key per intent, reused across retries of that intent.
+    const idempotencyKey = newIdempotencyKey();
+
     try {
-      const results = await sendTestEmail(id, emails);
+      const saved = await handleSave(false);
+      if (!saved) {
+        setTestSendState("idle");
+        return;
+      }
+
+      setTestSendState("sending");
+      const { results, idempotentReplay } = await sendTestEmail(id, emails, idempotencyKey);
       const failed = results.filter((r) => !r.success);
+
       if (failed.length === 0) {
-        toast.success("Test email sent");
+        setTestSendState("sent");
+        toast.success(idempotentReplay ? "Test email already sent for this request" : "Test email sent");
       } else {
+        setTestSendState("failed");
         toast.error(`Failed for: ${failed.map((f) => f.to).join(", ")}`);
       }
     } catch (error: any) {
+      setTestSendState("failed");
       toast.error(error?.response?.data?.error || "Failed to send test email");
     } finally {
+      sendingTestRef.current = false;
       setSendingTest(false);
     }
   }
 
   async function handleSendNow() {
     if (!id) return;
-    const saved = await handleSave(false);
-    if (!saved) return;
+    if (sendingNowRef.current) return; // synchronous double-click guard
+
+    sendingNowRef.current = true;
     setSendingNow(true);
+    setSendPhase("saving");
+
+    const idempotencyKey = newIdempotencyKey();
+
     try {
-      await sendCampaignNow(id);
-      toast.success("Campaign is sending");
-      const refreshed = await getCampaign(id);
-      applyCampaign(refreshed.campaign);
+      const saved = await handleSave(false);
+      if (!saved) {
+        setSendPhase("idle");
+        return;
+      }
+
+      setSendPhase("starting");
+      const result = await sendCampaignNow(id, idempotencyKey);
+
+      // alreadyStarted is a success, not a failure: it means this exact
+      // campaign was already sending — a duplicate click, or a retry of a
+      // request that had in fact succeeded. Reporting it as an error is what
+      // used to make admins click again and doubt whether anything happened.
+      toast.success(
+        result.alreadyStarted
+          ? "This campaign is already sending"
+          : `Campaign started — ${result.recipientCount.toLocaleString()} recipient${result.recipientCount !== 1 ? "s" : ""} queued`,
+      );
+
+      setSendPhase("started");
+      applyCampaign(result.campaign);
       setSendNowOpen(false);
+      // Seed the progress panel immediately so the admin sees the campaign
+      // moving rather than an empty screen while the first poll is pending.
+      getCampaignProgress(id).then(setLiveProgress).catch(() => {});
     } catch (error: any) {
-      toast.error(error?.response?.data?.error || "Failed to send campaign");
+      setSendPhase("failed");
+      toast.error(
+        error?.response?.data?.error || "Campaign could not be started. Please try again.",
+      );
     } finally {
+      sendingNowRef.current = false;
       setSendingNow(false);
     }
   }
@@ -712,13 +848,47 @@ export default function EmailCampaignBuilderPage() {
               <span>
                 Delivered: <b className="text-green-700">{progress.delivered}</b>
               </span>
+              {/* Reported separately from Failed: these still have delivery
+                  attempts left and are waiting out a backoff, so they are in
+                  flight, not lost. Folding them into "Failed" made a healthy
+                  send look like it was failing. */}
+              <span>
+                Retrying: <b className="text-amber-700">{progress.retrying}</b>
+              </span>
               <span>
                 Failed: <b className="text-red-700">{progress.failed}</b>
               </span>
               <span>
-                Remaining: <b className="text-slate-950">{progress.queued + progress.sending}</b>
+                Remaining: <b className="text-slate-950">{progress.queued + progress.sending + progress.retrying}</b>
               </span>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {campaign && ["sent", "completed_with_errors", "failed"].includes(campaign.status) && progress.total > 0 && (
+        <Card
+          className={cn(
+            campaign.status === "sent" && "border-green-200 bg-green-50/60",
+            campaign.status === "completed_with_errors" && "border-amber-200 bg-amber-50/60",
+            campaign.status === "failed" && "border-red-200 bg-red-50/60",
+          )}
+        >
+          <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-4 text-sm">
+            <span className="font-medium">
+              {campaign.status === "sent"
+                ? "Campaign completed."
+                : campaign.status === "completed_with_errors"
+                ? "Campaign completed with errors."
+                : "Campaign failed."}
+            </span>
+            <span className="text-muted-foreground">
+              <b className="text-green-700">{progress.delivered.toLocaleString()}</b> sent
+            </span>
+            <span className="text-muted-foreground">
+              <b className="text-red-700">{progress.failed.toLocaleString()}</b> failed
+            </span>
+            <span className="text-muted-foreground">of {progress.total.toLocaleString()} total</span>
           </CardContent>
         </Card>
       )}
@@ -779,8 +949,28 @@ export default function EmailCampaignBuilderPage() {
                 <Label>Email body</Label>
                 {isEditable ? (
                   <RichTextEditor value={htmlBody} onChange={setHtmlBody} onUploadImage={uploadImage} />
+                ) : isFullHtmlDocument(htmlBody) ? (
+                  // A full email document is rendered in a sandboxed frame,
+                  // never inline: it carries its own <style> block (which
+                  // would leak into the admin's stylesheet) and its own links
+                  // (which, rendered inline, navigate the admin SPA — that is
+                  // what produced GET /email/campaigns/kolekto.com.ng 500s).
+                  <iframe
+                    title="Email body"
+                    srcDoc={htmlBody}
+                    sandbox=""
+                    className="h-[420px] w-full rounded-md border bg-white"
+                  />
                 ) : (
-                  <div className="rounded-md border p-4 text-sm prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: htmlBody }} />
+                  // Sanitized: this renders admin-authored HTML into the
+                  // admin's own DOM, so it is a real XSS sink. Styled with the
+                  // same class as the editor (not Tailwind `prose`) so the
+                  // read-only view matches both the editor and the delivered
+                  // email.
+                  <div
+                    className="kolekto-email-editor rounded-md border p-4"
+                    dangerouslySetInnerHTML={{ __html: sanitizeCampaignHtml(htmlBody) }}
+                  />
                 )}
               </div>
 
@@ -1071,8 +1261,22 @@ export default function EmailCampaignBuilderPage() {
               <Textarea value={testEmails} onChange={(e) => setTestEmails(e.target.value)} rows={2} placeholder="you@example.com, teammate@example.com" />
               <Button onClick={handleSendTest} disabled={sendingTest} className="gap-2">
                 {sendingTest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Send Test Email
+                {testSendState === "saving"
+                  ? "Saving draft..."
+                  : testSendState === "sending"
+                  ? "Sending test..."
+                  : testSendState === "failed"
+                  ? "Failed — Retry"
+                  : testSendState === "sent"
+                  ? "Sent — Send again"
+                  : "Send Test Email"}
               </Button>
+              {testSendState === "sent" && (
+                <p className="text-xs text-green-700">Test sent successfully. Check the inbox above.</p>
+              )}
+              {testSendState === "failed" && (
+                <p className="text-xs text-red-700">The test could not be sent. Fix the issue above and retry.</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1124,7 +1328,17 @@ export default function EmailCampaignBuilderPage() {
               <p className="text-sm text-muted-foreground">
                 Subject: <span className="font-medium text-slate-950">{previewSubject}</span>
               </p>
-              <iframe title="Email preview" srcDoc={previewHtml} className="h-[65vh] w-full rounded-md border" />
+              {/* sandbox="" gives the frame an opaque origin with no script
+                  execution, no form submission and no access to this page —
+                  a srcDoc iframe is same-origin by default, so without it a
+                  script in a campaign body could reach window.parent and the
+                  admin session behind it. */}
+              <iframe
+                title="Email preview"
+                srcDoc={sanitizePreviewDocument(previewHtml)}
+                sandbox=""
+                className="h-[65vh] w-full rounded-md border bg-white"
+              />
             </>
           )}
         </DialogContent>
@@ -1140,8 +1354,31 @@ export default function EmailCampaignBuilderPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={sendingNow}>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={sendingNow} onClick={handleSendNow} className="bg-kolekto-orange text-white hover:bg-kolekto-orange/90">
-              {sendingNow ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send Now"}
+            {/* onClick — NOT onSelect. AlertDialogAction renders a Radix
+                button, which has no onSelect prop; `onSelect` on a <button>
+                is the native text-selection event and never fires on a click,
+                so the dialog closed and the send was never dispatched.
+
+                preventDefault() is what keeps the dialog open while the
+                request is in flight: Radix composes its own "close" handler
+                after this one and skips it when the event was defaulted-
+                prevented. That lets the admin see "Starting campaign...".
+                handleSendNow closes the dialog itself on success, and leaves
+                it open on failure so the error is visible. */}
+            <AlertDialogAction
+              disabled={sendingNow}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleSendNow();
+              }}
+              className="gap-2 bg-kolekto-orange text-white hover:bg-kolekto-orange/90"
+            >
+              {sendingNow && <Loader2 className="h-4 w-4 animate-spin" />}
+              {sendPhase === "saving"
+                ? "Saving draft..."
+                : sendPhase === "starting"
+                ? "Starting campaign..."
+                : "Send Now"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

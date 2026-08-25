@@ -6,6 +6,7 @@ import { Header } from './Header';
 import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { ADMIN_SCROLL_CONTAINER_ID } from '@/hooks/useScrollRestoration';
 
 export const AdminLayout = () => {
   const navigate = useNavigate();
@@ -46,7 +47,10 @@ export const AdminLayout = () => {
       {/* Main Content */}
       <div className="flex flex-col flex-1 overflow-hidden">
         <Header />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50">
+        <main
+          id={ADMIN_SCROLL_CONTAINER_ID}
+          className="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50"
+        >
           <ErrorBoundary key={location.pathname}>
             <Outlet />
           </ErrorBoundary>

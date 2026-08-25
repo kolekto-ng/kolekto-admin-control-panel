@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useEffect, useMemo, useRef } from "react";
+import { useParams, Link, useLocation } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   User as UserIcon,
@@ -19,20 +20,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { axiosInstance } from "@/lib/axios";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-
-interface UserStats {
-  availableBalance: number;
-  accountBalance: number;
-  totalWithdrawn: number;
-  pendingWithdrawal: number;
-  pendingBalance: number;
-  totalRaised: number;
-}
+import { useUserDetail, useUserWalletLive } from "@/features/users/queries";
+import { qk } from "@/lib/queryKeys";
+import { RefreshingIndicator } from "@/components/ui/table-skeleton";
 
 interface ActivityLogItem {
   id: string;
@@ -51,280 +45,167 @@ const VERIFICATION_BADGES: Record<string, { label: string; className: string; ic
 
 const UserDetailPage = () => {
   const { id } = useParams();
-  const [user, setUser] = useState<any>(null);
-  const [collections, setCollections] = useState<any[]>([]);
-  const [verificationStatus, setVerificationStatus] = useState<string>('unverified');
-  const [stats, setStats] = useState<UserStats>({
-    availableBalance: 0,
-    accountBalance: 0,
-    totalWithdrawn: 0,
-    pendingWithdrawal: 0,
-    pendingBalance: 0,
-    totalRaised: 0,
-  });
-  const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
-  const loadData = useCallback(async () => {
-    if (!id) return;
+  const location = useLocation();
+  const queryClient = useQueryClient();
 
-    try {
-      // Fetch User's Profile with nested collections, wallets, withdrawals, and KYC status (single consolidated query)
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select(`
-          id,
-          full_name,
-          email,
-          phone_number,
-          created_at,
-          kyc_verifications(status),
-          collections(
-            id,
-            title,
-            status,
-            created_at,
-            wallets(
-              net_payment,
-              available_balance,
-              pending_balance,
-              ledger_balance,
-              updated_at,
-              created_at
-            ),
-            withdrawals(
-              id,
-              amount,
-              status,
-              created_at
-            )
-          )
-        `)
-        .eq("id", id)
-        .single();
+  // The Users list passes its query string along when the row is clicked, so
+  // Back returns to the exact page/search/filter the admin left — rather than
+  // to a bare /users that would re-render page 1 of the unfiltered list.
+  const backTo = `/users${(location.state as { from?: string } | null)?.from ?? ""}`;
 
-      if (profileError) throw profileError;
+  // Two independent queries running in parallel. Previously the profile read
+  // and the live wallet call were awaited one after the other inside a single
+  // loadData(), so the page could not paint until the slower of the two — plus
+  // the faster one — had completed in sequence.
+  const {
+    data: detail,
+    isPending,
+    isError,
+    error,
+    isPlaceholderData,
+    isFetching,
+  } = useUserDetail(id);
+  const { data: liveStats } = useUserWalletLive(id);
 
-      if (profileData) {
-        setUser({
-          id: profileData.id,
-          name: profileData.full_name || "Unknown User",
-          email: profileData.email || "",
-          phone: profileData.phone_number || "",
-          joinDate: profileData.created_at || "",
-        });
-
-        // Extract KYC verification status
-        let kycStatus = "unverified";
-        if (profileData.kyc_verifications) {
-          if (Array.isArray(profileData.kyc_verifications)) {
-            if (profileData.kyc_verifications.length > 0) {
-              kycStatus = profileData.kyc_verifications[0]?.status || "unverified";
-            }
-          } else {
-            kycStatus = (profileData.kyc_verifications as any).status || "unverified";
-          }
-        }
-        setVerificationStatus(kycStatus);
-
-        const userCollections = profileData.collections || [];
-        setCollections(userCollections);
-
-        // Calculate Stats and extract Withdrawals client-side
-        let availableBalance = 0;
-        let ledgerBalance = 0;
-        let pendingBalance = 0;
-        let netPayment = 0; // Total Raised across all user's collections
-        let pendingWithdrawal = 0;
-        let totalWithdrawn = 0; // Calculated from approved withdrawals
-        let approvedButNotLedgerDeducted = 0;
-        const userWithdrawals: any[] = [];
-
-        userCollections.forEach((collection: any) => {
-          // 1. Process Wallets
-          const walletList = collection.wallets;
-          let selectedWallet = null;
-          if (walletList) {
-            if (Array.isArray(walletList)) {
-              if (walletList.length > 0) {
-                selectedWallet = [...walletList].sort((a, b) => 
-                  new Date(b.updated_at || b.created_at || 0).getTime() - 
-                  new Date(a.updated_at || a.created_at || 0).getTime()
-                )[0];
-              }
-            } else {
-              selectedWallet = walletList;
-            }
-          }
-          if (selectedWallet) {
-            availableBalance += Number(selectedWallet.available_balance || 0);
-            ledgerBalance += Number(selectedWallet.ledger_balance || 0);
-            pendingBalance += Number(selectedWallet.pending_balance || 0);
-            netPayment += Number(selectedWallet.net_payment || 0);
-          }
-
-          // 2. Process Withdrawals
-          const collectionWithdrawals = collection.withdrawals;
-          if (Array.isArray(collectionWithdrawals)) {
-            collectionWithdrawals.forEach((w: any) => {
-              const withdrawalWithCol = { ...w, collection_id: collection.id };
-              userWithdrawals.push(withdrawalWithCol);
-
-              if (w.status === "pending") {
-                pendingWithdrawal += w.amount;
-              } else if (w.status === "approved" || w.status === "success" || w.status === "paid") {
-                totalWithdrawn += w.amount;
-                if (w.status === "approved") {
-                  approvedButNotLedgerDeducted += w.amount;
-                }
-              }
-            });
-          }
-        });
-
-        // Sort withdrawals newest first
-        userWithdrawals.sort((a, b) => 
-          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-        );
-
-        const accountBalance = ledgerBalance; // Total Balance = available + pending
-        void approvedButNotLedgerDeducted; // tracked but not used for balance math
-
-        // Prefer the live, server-recomputed account snapshot. The summed
-        // cached `wallets` columns above over-report whenever a withdrawal was
-        // approved before the recompute-on-approval logic existed (and the
-        // collection has had no activity since) — the cached ledger still holds
-        // money that has already left the wallet. The live endpoint reuses the
-        // exact pooled computeWalletBalances() the host dashboard uses, so admin
-        // and host always agree. Best-effort: fall back to the cached sums if
-        // the backend is unreachable, so the page never breaks.
-        let liveStats: any = null;
-        try {
-          const { data: live } = await axiosInstance.get(
-            `/adminurlabdkole/users/${id}/wallet-live`,
-          );
-          if (live && typeof live.totalBalance === "number") {
-            liveStats = live;
-          }
-        } catch (liveErr) {
-          console.warn(
-            "Live account wallet fetch failed — falling back to cached wallet columns:",
-            liveErr,
-          );
-        }
-
-        setStats({
-          availableBalance: liveStats
-            ? Number(liveStats.availableBalance || 0)
-            : availableBalance,
-          accountBalance: liveStats
-            ? Number(liveStats.totalBalance || 0)
-            : accountBalance,
-          // `withdrawn` from the live endpoint is the canonical completed-
-          // withdrawals figure (computeWalletBalances); keep the existing
-          // client tally as the fallback.
-          totalWithdrawn: liveStats
-            ? Number(liveStats.withdrawn ?? totalWithdrawn)
-            : totalWithdrawn,
-          pendingWithdrawal: liveStats
-            ? Number(liveStats.pendingWithdrawalRequests ?? pendingWithdrawal)
-            : pendingWithdrawal,
-          pendingBalance: liveStats
-            ? Number(liveStats.pendingBalance || 0)
-            : pendingBalance,
-          totalRaised: liveStats
-            ? Number(liveStats.totalRaised || 0)
-            : netPayment,
-        });
-
-        // 4. Generate Activity Log
-        const logs: ActivityLogItem[] = [];
-
-        // Account Created
-        if (profileData.created_at) {
-          logs.push({
-            id: "join-" + id,
-            type: "account_created",
-            description: "Account created",
-            date: profileData.created_at,
-          });
-        }
-
-        // Collection Created events
-        userCollections?.forEach((c) => {
-          logs.push({
-            id: "col-" + c.id,
-            type: "collection_created",
-            description: `Created collection "${c.title}"`,
-            date: c.created_at,
-          });
-        });
-
-        // Withdrawal requests
-        userWithdrawals.forEach((w) => {
-          logs.push({
-            id: "with-" + w.id,
-            type: "withdrawal_request",
-            description: `Requested withdrawal of ${formatCurrency(w.amount)}`,
-            date: w.created_at,
-          });
-        });
-
-        // Sort logs newest first
-        logs.sort(
-          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-        );
-        setActivityLog(logs);
-      }
-    } catch (error) {
+  useEffect(() => {
+    if (isError) {
       console.error("Failed to load user details:", error);
       toast({
         title: "Error",
         description: "Failed to load user details.",
         variant: "destructive",
       });
-    } finally {
-      if (loading) setLoading(false);
     }
-  }, [id]);
+  }, [isError, error, toast]);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // REALTIME
+  //
+  // This page used to subscribe to *every* row change on `wallets` and
+  // `withdrawals` platform-wide and re-run the entire load on each one. Any
+  // contribution by any user anywhere refetched this page. The subscription is
+  // kept (admins do want live balances) but it now checks the payload against
+  // this user's collections first, and invalidates the two relevant query keys
+  // instead of imperatively refetching — so an unrelated event costs nothing
+  // and a relevant one flows through the same cache path as everything else.
+  // ───────────────────────────────────────────────────────────────────────────
+  const collectionIds = useMemo(
+    () => new Set((detail?.collections ?? []).map((c: { id: string }) => c.id)),
+    [detail?.collections],
+  );
+  const collectionIdsRef = useRef(collectionIds);
+  collectionIdsRef.current = collectionIds;
 
   useEffect(() => {
-    // Initial load
-    setLoading(true);
-    loadData();
+    if (!id) return;
 
-    // Setup Realtime Subscription
+    const isRelevant = (payload: { new?: unknown; old?: unknown }) => {
+      const row = (payload.new ?? payload.old) as
+        | { collection_id?: string; user_id?: string }
+        | undefined;
+      if (!row) return false;
+      if (row.user_id && row.user_id === id) return true;
+      return Boolean(
+        row.collection_id && collectionIdsRef.current.has(row.collection_id),
+      );
+    };
+
+    const refresh = (payload: { new?: unknown; old?: unknown }) => {
+      if (!isRelevant(payload)) return;
+      queryClient.invalidateQueries({ queryKey: qk.users.detail(id) });
+      queryClient.invalidateQueries({ queryKey: qk.users.wallet(id) });
+    };
+
     const channel = supabase
-      .channel('user-details-changes')
+      .channel(`user-details-${id}`)
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'wallets' },
-        (payload) => {
-          console.log('Wallet changed, reloading...', payload);
-          loadData();
-        }
+        "postgres_changes",
+        { event: "*", schema: "public", table: "wallets" },
+        refresh,
       )
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'withdrawals' },
-        (payload) => {
-          console.log('Withdrawal changed, reloading...', payload);
-          loadData();
-        }
+        "postgres_changes",
+        { event: "*", schema: "public", table: "withdrawals" },
+        refresh,
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadData]);
+  }, [id, queryClient]);
 
+  const user = detail ?? null;
+  const collections = detail?.collections ?? [];
+  const verificationStatus = detail?.verificationStatus ?? "unverified";
 
-  if (loading) {
+  // Prefer the live, server-recomputed snapshot; fall back to the summed cached
+  // wallet columns when the backend is unreachable, exactly as before.
+  const stats = useMemo(() => {
+    const cached = detail?.cachedTotals;
+    return {
+      availableBalance: liveStats?.availableBalance ?? cached?.availableBalance ?? 0,
+      accountBalance: liveStats?.accountBalance ?? cached?.accountBalance ?? 0,
+      totalWithdrawn: liveStats?.totalWithdrawn ?? cached?.totalWithdrawn ?? 0,
+      pendingWithdrawal: liveStats?.pendingWithdrawal ?? cached?.pendingWithdrawal ?? 0,
+      pendingBalance: liveStats?.pendingBalance ?? cached?.pendingBalance ?? 0,
+      totalRaised: liveStats?.totalRaised ?? cached?.totalRaised ?? 0,
+    };
+  }, [detail?.cachedTotals, liveStats]);
+
+  const activityLog = useMemo<ActivityLogItem[]>(() => {
+    if (!detail) return [];
+    const logs: ActivityLogItem[] = [];
+
+    if (detail.joinDate) {
+      logs.push({
+        id: "join-" + detail.id,
+        type: "account_created",
+        description: "Account created",
+        date: detail.joinDate,
+      });
+    }
+
+    for (const c of detail.collections ?? []) {
+      logs.push({
+        id: "col-" + c.id,
+        type: "collection_created",
+        description: `Created collection "${c.title}"`,
+        date: c.created_at,
+      });
+    }
+
+    for (const w of detail.withdrawals ?? []) {
+      logs.push({
+        id: "with-" + w.id,
+        type: "withdrawal_request",
+        description: `Requested withdrawal of ${formatCurrency(w.amount)}`,
+        date: w.created_at,
+      });
+    }
+
+    logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return logs;
+  }, [detail]);
+
+  // Only a genuine cold start blocks. Arriving from the Users list seeds the
+  // header from the cached row (isPlaceholderData), so the identity fields
+  // render on the first frame while the financial detail streams in behind.
+  if (isPending && !detail) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" />
-        <span>Loading user data...</span>
+      <div className="space-y-6">
+        <div className="flex items-center space-x-2">
+          <Skeleton className="h-9 w-9 rounded-md" />
+          <Skeleton className="h-7 w-40" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Skeleton className="h-[420px] md:col-span-1" />
+          <div className="md:col-span-2 space-y-6">
+            <Skeleton className="h-32" />
+            <Skeleton className="h-64" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -334,7 +215,7 @@ const UserDetailPage = () => {
       <div className="text-center py-8">
         <h2 className="text-2xl font-bold">User not found</h2>
         <Button asChild className="mt-4">
-          <Link to="/users">Back to Users</Link>
+          <Link to={backTo}>Back to Users</Link>
         </Button>
       </div>
     );
@@ -345,11 +226,15 @@ const UserDetailPage = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <Button variant="ghost" size="icon" asChild>
-            <Link to="/users">
+            <Link to={backTo}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
           <h1 className="text-2xl font-bold tracking-tight">User Details</h1>
+          {/* Placeholder data means the header came from the cached list row and
+              the full record is still in flight — say so quietly rather than
+              hiding the page behind a spinner. */}
+          <RefreshingIndicator show={isPlaceholderData || isFetching} />
         </div>
         <div className="flex space-x-2">
           {/* Actions could go here */}

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { supabase } from "@/integrations/supabase/client";
+import { invalidateUser } from "@/lib/cacheInvalidation";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -550,4 +551,9 @@ async function recalculateVerificationStatus(userId: string) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId);
+
+  // Single choke point for every KYC decision path (approve/reject document,
+  // NIN verify/unverify), so the Users table's verification badge and filter
+  // stay correct without any other admin page being refetched.
+  invalidateUser(userId);
 }

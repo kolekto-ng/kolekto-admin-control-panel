@@ -2,7 +2,8 @@ import { Component, Suspense, lazy, type ComponentType, type ReactNode } from "r
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { AdminLayout } from "./components/layout/AdminLayout";
@@ -132,8 +133,6 @@ const EmailCampaignsPage = lazyWithReload("EmailCampaignsPage", () => import("./
 const EmailCampaignBuilderPage = lazyWithReload("EmailCampaignBuilderPage", () => import("./pages/communications/EmailCampaignBuilderPage"));
 const EmailTemplatesPage = lazyWithReload("EmailTemplatesPage", () => import("./pages/communications/EmailTemplatesPage"));
 const EmailLogsPage = lazyWithReload("EmailLogsPage", () => import("./pages/communications/EmailLogsPage"));
-
-const queryClient = new QueryClient();
 
 function RouteLoadingFallback() {
   return (

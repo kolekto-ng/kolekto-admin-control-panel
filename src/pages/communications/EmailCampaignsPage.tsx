@@ -33,8 +33,15 @@ const STATUS_STYLES: Record<CampaignStatus, string> = {
   scheduled: "border-blue-200 bg-blue-50 text-blue-700",
   sending: "border-amber-200 bg-amber-50 text-amber-700",
   sent: "border-green-200 bg-green-50 text-green-700",
+  // Amber, not green: a campaign that finished with failures must not read
+  // as a clean success in the list view.
+  completed_with_errors: "border-amber-300 bg-amber-50 text-amber-800",
   failed: "border-red-200 bg-red-50 text-red-700",
   cancelled: "border-slate-200 bg-slate-100 text-slate-500",
+};
+
+const STATUS_LABELS: Partial<Record<CampaignStatus, string>> = {
+  completed_with_errors: "completed with errors",
 };
 
 const PAGE_SIZE = 20;
@@ -178,10 +185,30 @@ export default function EmailCampaignsPage() {
                 </div>
                 <div>
                   <Badge variant="outline" className={STATUS_STYLES[c.status]}>
-                    {c.status}
+                    {STATUS_LABELS[c.status] ?? c.status}
                   </Badge>
                 </div>
-                <div className="text-xs text-muted-foreground">{c.recipient_count} recipient{c.recipient_count !== 1 ? "s" : ""}</div>
+                {/* Delivery breakdown, not just an audience size — the whole
+                    point of a history view is being able to see at a glance
+                    which campaigns had failures without opening each one.
+                    `stats` is null when the summary query degraded, in which
+                    case we fall back to the audience count alone. */}
+                <div className="text-xs text-muted-foreground">
+                  <div>{c.recipient_count.toLocaleString()} recipient{c.recipient_count !== 1 ? "s" : ""}</div>
+                  {c.stats && c.stats.total > 0 && (
+                    <div className="mt-0.5 flex flex-wrap gap-x-2">
+                      <span className="text-green-700">{c.stats.delivered.toLocaleString()} sent</span>
+                      {c.stats.failed > 0 && (
+                        <span className="text-red-700">{c.stats.failed.toLocaleString()} failed</span>
+                      )}
+                      {c.stats.queued + c.stats.processing + c.stats.retrying > 0 && (
+                        <span className="text-amber-700">
+                          {(c.stats.queued + c.stats.processing + c.stats.retrying).toLocaleString()} pending
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground">
                   {c.status === "scheduled" && c.scheduled_at
                     ? `Scheduled ${formatDateTime(c.scheduled_at)}`

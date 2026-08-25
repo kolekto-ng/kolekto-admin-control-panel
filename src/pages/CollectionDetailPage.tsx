@@ -1,16 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, Users, Calendar, Wallet, Link as LinkIcon, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { formatDate, formatCurrency } from '@/lib/formatters';
-import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Progress } from "@/components/ui/progress";
-import { supabase } from '@/integrations/supabase/client';
-import { axiosInstance } from '@/lib/axios';
+import {
+  useCollectionDetail,
+  useCollectionWalletLive,
+} from '@/features/collections/queries';
+import { RefreshingIndicator } from '@/components/ui/table-skeleton';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface Contributor {
   id: string;
@@ -69,126 +72,42 @@ interface CollectionDetail {
 
 const CollectionDetailPage = () => {
   const { id } = useParams();
-  const [collection, setCollection] = useState<CollectionDetail | null>(null);
-  const [organizer, setOrganizer] = useState<any>(null); // Profile
-  const [contributors, setContributors] = useState<Contributor[]>([]);
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [wallet, setWallet] = useState<any>(null);
-  // Live-recomputed wallet snapshot from the backend (GET .../wallet-live).
-  // Reuses the canonical computeWalletBalances() so the settled↔pending split
-  // is correct as of right now, instead of the cached `wallets` columns which
-  // go stale after a settlement window passes with no wallet write.
-  const [liveWallet, setLiveWallet] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const location = useLocation();
   const { toast } = useToast();
 
-  const loadData = useCallback(async () => {
-    if (!id) return;
-    try {
-      setLoading(true);
-      // 1. Fetch Collection Details, Organizer Profile, Wallet, Contributions, and Withdrawals (consolidated query)
-      const { data: collectionData, error: collectionError } = await supabase
-        .from('collections')
-        .select(`
-          id,
-          title,
-          description,
-          status,
-          created_at,
-          amount,
-          total_contributions,
-          type,
-          collection_type,
-          max_contributions,
-          user_id,
-          currency,
-          currency_symbol,
-          contributions_fields,
-          price_tiers,
-          deadline,
-          support_phone_number,
-          slug,
-          rejection_reason,
-          min_contribution,
-          target_amount,
-          event_date,
-          ticket_mode,
-          allow_multiple_quantity,
-          is_open_ended,
-          auto_close,
-          campaign_category,
-          campaign_summary,
-          campaign_country,
-          organizer:user_id(id, full_name, email, phone_number),
-          wallets(net_payment, available_balance, pending_balance, ledger_balance, withdrawn, updated_at, created_at),
-          contributions(id, name, amount, created_at, status),
-          withdrawals(id, amount, status, created_at)
-        `)
-        .eq('id', id)
-        .single();
+  // The Collections list hands its query string over on the row click, so Back
+  // lands on the same page/search/filter instead of a reset /collections.
+  const backTo = `/collections${(location.state as { from?: string } | null)?.from ?? ""}`;
 
-      if (collectionError) throw collectionError;
-      setCollection(collectionData);
-      setOrganizer(collectionData.organizer || null);
+  // Two parallel queries. The live-wallet request used to be awaited inside the
+  // same function as the Supabase read, after it — a waterfall where the page
+  // could not paint until both had completed in sequence.
+  const {
+    data: detail,
+    isPending,
+    isError,
+    error,
+    isPlaceholderData,
+    isFetching,
+  } = useCollectionDetail(id);
+  const { data: liveWallet } = useCollectionWalletLive(id);
 
-      // Extract the wallet — handle legacy duplicate wallet rows by sorting by updated_at descending
-      const walletList = collectionData.wallets;
-      let selectedWallet = null;
-      if (Array.isArray(walletList) && walletList.length > 0) {
-        selectedWallet = [...walletList].sort((a, b) => 
-          new Date(b.updated_at || b.created_at || 0).getTime() - 
-          new Date(a.updated_at || a.created_at || 0).getTime()
-        )[0];
-      } else if (walletList && !Array.isArray(walletList)) {
-        selectedWallet = walletList;
-      }
-      setWallet(selectedWallet);
-
-      // Extract and sort contributors (created_at descending)
-      const contributionsList = collectionData.contributions || [];
-      const sortedContributors = [...contributionsList].sort((a, b) => 
-        new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-      );
-      setContributors(sortedContributors);
-
-      // Extract and sort withdrawals (created_at descending)
-      const withdrawalsList = collectionData.withdrawals || [];
-      const sortedWithdrawals = [...withdrawalsList].sort((a, b) => 
-        new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-      );
-      setWithdrawals(sortedWithdrawals);
-
-      // Live wallet snapshot — additive and best-effort. If the backend is
-      // unreachable we silently keep the cached `wallets` columns (set above),
-      // so this never blocks or breaks the page; it only upgrades the numbers
-      // to a live recomputation when available.
-      try {
-        const { data: live } = await axiosInstance.get(
-          `/adminurlabdkole/collections/${id}/wallet-live`,
-        );
-        if (live && (live.source === 'live' || typeof live.availableBalance === 'number')) {
-          setLiveWallet(live);
-        }
-      } catch (liveErr) {
-        console.warn('Live wallet fetch failed — falling back to cached wallet columns:', liveErr);
-        setLiveWallet(null);
-      }
-
-    } catch (error) {
+  useEffect(() => {
+    if (isError) {
       console.error('Failed to load collection data:', error);
       toast({
         title: 'Error',
         description: 'Failed to load collection details.',
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
     }
-  }, [id, toast]);
+  }, [isError, error, toast]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const collection = (detail?.collection ?? null) as CollectionDetail | null;
+  const organizer = detail?.organizer ?? null;
+  const wallet = detail?.wallet ?? null;
+  const contributors = (detail?.contributors ?? []) as Contributor[];
+  const withdrawals = (detail?.withdrawals ?? []) as Withdrawal[];
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -203,11 +122,15 @@ const CollectionDetailPage = () => {
     }
   };
 
-  if (loading) {
+  if (isPending && !detail) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" />
-        <span>Loading collection data...</span>
+      <div className="space-y-6">
+        <div className="flex items-center space-x-2">
+          <Skeleton className="h-9 w-9 rounded-md" />
+          <Skeleton className="h-7 w-56" />
+        </div>
+        <Skeleton className="h-40" />
+        <Skeleton className="h-72" />
       </div>
     );
   }
@@ -217,7 +140,7 @@ const CollectionDetailPage = () => {
       <div className="text-center py-8">
         <h2 className="text-2xl font-bold">Collection not found</h2>
         <Button asChild className="mt-4">
-          <Link to="/collections">Back to Collections</Link>
+          <Link to={backTo}>Back to Collections</Link>
         </Button>
       </div>
     );
@@ -332,12 +255,16 @@ const CollectionDetailPage = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <Button variant="ghost" size="icon" asChild>
-            <Link to="/collections">
+            <Link to={backTo}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
           <div className="flex flex-col">
             <h1 className="text-2xl font-bold tracking-tight">{collection.title}</h1>
+            {/* Header seeded from the cached list row while the full record
+                loads, or a background refresh in flight — surfaced quietly
+                instead of blanking the page. */}
+            <RefreshingIndicator show={isPlaceholderData || isFetching} />
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               {getStatusBadge(collection.status)}
               <Badge variant="outline" className="capitalize">
