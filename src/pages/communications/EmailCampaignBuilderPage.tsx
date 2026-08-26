@@ -51,6 +51,7 @@ import {
   deleteAttachment,
   listTemplates,
   previewAudience,
+  getAudienceSummary,
   downloadAudienceCsv,
   searchRecipients,
   getCampaignProgress,
@@ -62,6 +63,7 @@ import {
   type EmailTemplate,
   type AudienceFilters,
   type AudiencePreview,
+  type CampaignAudienceSummary,
   type RecipientSearchResult,
 } from "./api";
 
@@ -132,6 +134,15 @@ export default function EmailCampaignBuilderPage() {
   const [audiencePreview, setAudiencePreview] = useState<AudiencePreview | null>(null);
   const [audiencePreviewLoading, setAudiencePreviewLoading] = useState(false);
   const [audiencePage, setAudiencePage] = useState(0);
+  // Server-computed truth about this campaign's audience: how many recipients
+  // are actually attached vs how many a saved filter would resolve to.
+  //
+  // This is deliberately NOT derived from the live preview. The preview answers
+  // "who matches the filter I am currently typing"; it says nothing about what
+  // is stored against the campaign. Conflating the two is what previously let
+  // the page display 609 recipients for a campaign with none attached, and then
+  // hand the admin "Campaign has no recipients" on send.
+  const [audienceSummary, setAudienceSummary] = useState<CampaignAudienceSummary | null>(null);
   const [savingFilter, setSavingFilter] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const AUDIENCE_PAGE_SIZE = 10;
@@ -447,6 +458,7 @@ export default function EmailCampaignBuilderPage() {
       setRecipientCount(recipientCount);
       setSelectedPicks(new Map());
       await refreshRecipients();
+      void refreshAudienceSummary();
       toast.success(`Added ${toAdd.length} recipient${toAdd.length !== 1 ? "s" : ""}`);
     } catch (error: any) {
       toast.error(error?.response?.data?.error || "Failed to add recipients");
@@ -550,6 +562,7 @@ export default function EmailCampaignBuilderPage() {
       setRecipientCount(recipientCount);
       setRecipientDraft("");
       await refreshRecipients();
+      void refreshAudienceSummary();
       toast.success(`Added ${emails.length} recipient${emails.length !== 1 ? "s" : ""}`);
     } catch (error: any) {
       toast.error(error?.response?.data?.error || "Failed to add recipients");
@@ -565,6 +578,7 @@ export default function EmailCampaignBuilderPage() {
       const { recipientCount } = await removeRecipient(id, recipientId);
       setRecipientCount(recipientCount);
       setRecipients((prev) => prev.filter((r) => r.id !== recipientId));
+      void refreshAudienceSummary();
     } catch (error: any) {
       toast.error(error?.response?.data?.error || "Failed to remove recipient");
     } finally {
@@ -572,12 +586,50 @@ export default function EmailCampaignBuilderPage() {
     }
   }
 
+  /** Re-read the server's view of the audience. Call after anything that changes it. */
+  const refreshAudienceSummary = useCallback(async () => {
+    if (!id || isNew) return;
+    try {
+      setAudienceSummary(await getAudienceSummary(id));
+    } catch {
+      // Non-fatal: the summary is a display aid. The send endpoint performs its
+      // own authoritative check, so a failed refresh degrades the labels rather
+      // than letting anything unsafe through.
+      setAudienceSummary(null);
+    }
+  }, [id, isNew]);
+
+  useEffect(() => {
+    void refreshAudienceSummary();
+  }, [refreshAudienceSummary]);
+
+  // Does the audience builder currently describe an actual audience?
+  // An object with no conditions is "nothing configured", never "everyone" —
+  // the same rule the backend enforces, checked here only so the UI can explain
+  // the problem before the request rather than after it.
+  const hasAudienceConditions =
+    Object.entries(audienceFilters).some(([key, value]) => {
+      if (key === "excludeEmails") return Array.isArray(value) && value.length > 0;
+      return value !== undefined && value !== null && value !== "";
+    });
+
   async function handleSaveAudienceFilter() {
     if (!id) return;
+
+    // Refuse locally with the same rule the API applies, so the admin gets an
+    // immediate, specific explanation instead of a round-trip and a generic
+    // failure toast. Previously this saved `{}` and reported success, which is
+    // what made an unconfigured audience look like a configured one.
+    if (!hasAudienceConditions) {
+      toast.error("No audience configured. Add at least one audience condition before saving.");
+      return;
+    }
+
     setSavingFilter(true);
     try {
       const updated = await updateCampaign(id, { filterJson: audienceFilters });
       setCampaign(updated);
+      await refreshAudienceSummary();
       toast.success("Audience filter saved — it will be applied when you send this campaign");
     } catch (error: any) {
       toast.error(error?.response?.data?.error || "Failed to save audience filter");
@@ -747,7 +799,41 @@ export default function EmailCampaignBuilderPage() {
     }
   }
 
-  const effectiveRecipientCount = recipientMode === "filter" ? (audiencePreview?.total ?? 0) : recipientCount;
+  // ───────────────────────────────────────────────────────────────────────
+  // WHO WILL ACTUALLY RECEIVE THIS CAMPAIGN
+  //
+  // This used to be:
+  //
+  //   recipientMode === "filter" ? (audiencePreview?.total ?? 0) : recipientCount
+  //
+  // i.e. in filter mode the page reported the LIVE PREVIEW total as though it
+  // were the campaign's recipients. Because an unconfigured filter matched the
+  // whole directory, the tab read "Recipients (609)" and Send was enabled for a
+  // campaign with zero recipients attached and no audience saved.
+  //
+  // Everything below now comes from the server's audience summary, which counts
+  // attached rows and resolves the SAVED filter — never the in-progress one.
+  const attachedRecipients = audienceSummary?.attached ?? recipientCount;
+  const eligibleFromFilter = audienceSummary?.eligibleFromFilter ?? 0;
+  const unsubscribedExcluded = audienceSummary?.unsubscribedExcluded ?? 0;
+  const filterConfigured = audienceSummary?.filterConfigured ?? false;
+
+  // Upper bound: a person who is both attached and a filter match is inserted
+  // once at send time, so these two can overlap. Shown as "up to" in the UI.
+  const estimatedRecipients = audienceSummary?.estimatedRecipients ?? attachedRecipients;
+
+  // Sending requires the server to have found something real to send to.
+  // While the summary is still loading we fall back to the attached count,
+  // which is never an over-estimate.
+  const canSend = audienceSummary ? audienceSummary.canSend : attachedRecipients > 0;
+
+  const sendBlockedReason = canSend
+    ? null
+    : filterConfigured
+      ? unsubscribedExcluded > 0
+        ? "Every recipient matching the saved audience has unsubscribed."
+        : "The saved audience filter currently matches nobody."
+      : "No eligible recipients. Configure an audience before sending this campaign.";
 
   if (loading || isNew) {
     return (
@@ -801,7 +887,8 @@ export default function EmailCampaignBuilderPage() {
                   }
                   setScheduleOpen(true);
                 }}
-                disabled={effectiveRecipientCount === 0}
+                disabled={!canSend}
+                title={sendBlockedReason ?? undefined}
                 className="gap-2"
               >
                 <CalendarClock className="h-4 w-4" /> {campaign?.status === "scheduled" ? "Reschedule" : "Schedule"}
@@ -809,7 +896,8 @@ export default function EmailCampaignBuilderPage() {
               <Button
                 className="gap-2 bg-kolekto-orange text-white hover:bg-kolekto-orange/90"
                 onClick={() => setSendNowOpen(true)}
-                disabled={effectiveRecipientCount === 0}
+                disabled={!canSend}
+                title={sendBlockedReason ?? undefined}
               >
                 <SendHorizonal className="h-4 w-4" /> Send Now
               </Button>
@@ -897,7 +985,8 @@ export default function EmailCampaignBuilderPage() {
         <TabsList>
           <TabsTrigger value="compose">Compose</TabsTrigger>
           <TabsTrigger value="recipients" className="gap-1">
-            <Users className="h-3.5 w-3.5" /> Recipients ({effectiveRecipientCount})
+            {/* Attached recipients — the stored truth, not the live filter preview. */}
+            <Users className="h-3.5 w-3.5" /> Recipients ({attachedRecipients})
           </TabsTrigger>
           <TabsTrigger value="attachments" className="gap-1">
             <Paperclip className="h-3.5 w-3.5" /> Attachments ({attachments.length})
@@ -983,6 +1072,41 @@ export default function EmailCampaignBuilderPage() {
         </TabsContent>
 
         <TabsContent value="recipients" className="space-y-4">
+          {/* Server-computed audience state. Separates "attached to this
+              campaign" from "matches the saved filter" so the page can never
+              again present a directory-wide preview count as this campaign's
+              recipients. Every figure comes from /audience-summary. */}
+          {audienceSummary && (
+            <div
+              className={cn(
+                "rounded-md border p-3 text-sm",
+                canSend ? "bg-muted/30" : "border-amber-300 bg-amber-50",
+              )}
+            >
+              <div className="mb-1.5 font-medium">Audience</div>
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
+                <span>
+                  <span className="font-semibold text-foreground">{attachedRecipients.toLocaleString()}</span> attached
+                </span>
+                {filterConfigured ? (
+                  <span>
+                    <span className="font-semibold text-foreground">{eligibleFromFilter.toLocaleString()}</span> eligible from filter
+                  </span>
+                ) : (
+                  <span>No audience filter configured</span>
+                )}
+                {unsubscribedExcluded > 0 && (
+                  <span>
+                    <span className="font-semibold text-foreground">{unsubscribedExcluded.toLocaleString()}</span> unsubscribed
+                  </span>
+                )}
+              </div>
+              {sendBlockedReason && (
+                <p className="mt-2 border-t border-amber-200 pt-2 text-amber-800">{sendBlockedReason}</p>
+              )}
+            </div>
+          )}
+
           {isEditable && (
             <div className="flex gap-2">
               <Button
@@ -1133,10 +1257,25 @@ export default function EmailCampaignBuilderPage() {
                       <span className="flex items-center gap-2 text-muted-foreground">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Calculating…
                       </span>
+                    ) : (audiencePreview?.noFilterConfigured ?? !hasAudienceConditions) ? (
+                      // "Nothing configured" and "configured, matches nobody" are
+                      // different problems with different fixes, so they get
+                      // different messages. This branch is what used to render
+                      // "609 matching recipients" for an empty filter.
+                      <span className="text-muted-foreground">
+                        No audience configured — add at least one condition below.
+                      </span>
                     ) : (
                       <>
-                        <span className="font-semibold text-slate-950">{audiencePreview?.total ?? 0}</span>{" "}
-                        <span className="text-muted-foreground">matching recipient{(audiencePreview?.total ?? 0) !== 1 ? "s" : ""}</span>
+                        <span className="font-semibold text-slate-950">{audiencePreview?.eligible ?? 0}</span>{" "}
+                        <span className="text-muted-foreground">
+                          eligible recipient{(audiencePreview?.eligible ?? 0) !== 1 ? "s" : ""}
+                        </span>
+                        {(audiencePreview?.total ?? 0) !== (audiencePreview?.eligible ?? 0) && (
+                          <span className="text-muted-foreground">
+                            {" "}· {audiencePreview?.total ?? 0} matching, {audiencePreview?.unsubscribed ?? 0} unsubscribed
+                          </span>
+                        )}
                         {(audienceFilters.excludeEmails?.length ?? 0) > 0 && (
                           <span className="text-muted-foreground"> · {audienceFilters.excludeEmails!.length} excluded</span>
                         )}
@@ -1144,7 +1283,16 @@ export default function EmailCampaignBuilderPage() {
                     )}
                   </div>
                   {isEditable && (
-                    <Button size="sm" onClick={handleSaveAudienceFilter} disabled={savingFilter} className="gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleSaveAudienceFilter}
+                      // Blocked rather than allowed-then-rejected: saving an
+                      // empty filter is what previously produced a success
+                      // toast for an audience that would send to nobody.
+                      disabled={savingFilter || !hasAudienceConditions}
+                      title={!hasAudienceConditions ? "Add at least one audience condition first" : undefined}
+                      className="gap-2"
+                    >
                       {savingFilter ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       Save filter to campaign
                     </Button>
@@ -1347,9 +1495,50 @@ export default function EmailCampaignBuilderPage() {
       <AlertDialog open={sendNowOpen} onOpenChange={setSendNowOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Send this campaign now?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will send "{name}" to {effectiveRecipientCount} recipient{effectiveRecipientCount !== 1 ? "s" : ""} immediately. This cannot be undone.
+            <AlertDialogTitle>Ready to send</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              {/* Every number here is server-computed (audience-summary), never
+                  inferred from the live filter preview. Attached and filter
+                  counts are listed separately because they overlap — the send
+                  de-duplicates them, so a single summed total would overstate it. */}
+              <div className="space-y-3">
+                <p>
+                  This will send <span className="font-medium text-foreground">"{name}"</span> immediately.
+                  This cannot be undone.
+                </p>
+
+                <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                  <div className="mb-1.5 font-medium text-foreground">Recipients</div>
+                  <ul className="space-y-1">
+                    <li className="flex justify-between gap-4">
+                      <span>Attached directly</span>
+                      <span className="font-medium text-foreground">{attachedRecipients.toLocaleString()}</span>
+                    </li>
+                    {filterConfigured && (
+                      <li className="flex justify-between gap-4">
+                        <span>Eligible from audience filter</span>
+                        <span className="font-medium text-foreground">{eligibleFromFilter.toLocaleString()}</span>
+                      </li>
+                    )}
+                    {unsubscribedExcluded > 0 && (
+                      <li className="flex justify-between gap-4">
+                        <span>Excluded (unsubscribed)</span>
+                        <span className="font-medium text-foreground">{unsubscribedExcluded.toLocaleString()}</span>
+                      </li>
+                    )}
+                  </ul>
+                  {filterConfigured && attachedRecipients > 0 ? (
+                    <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                      Up to {estimatedRecipients.toLocaleString()} emails. Anyone both attached and
+                      matching the filter is sent to once.
+                    </p>
+                  ) : (
+                    <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                      {estimatedRecipients.toLocaleString()} email{estimatedRecipients !== 1 ? "s" : ""} will be sent.
+                    </p>
+                  )}
+                </div>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1391,7 +1580,11 @@ export default function EmailCampaignBuilderPage() {
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              "{name}" will be sent automatically to {effectiveRecipientCount} recipient{effectiveRecipientCount !== 1 ? "s" : ""} at the time you choose below.
+              {/* The audience is re-resolved by the scheduler when the time
+                  arrives, so this is the count as of now, not a locked-in set. */}
+              "{name}" will be sent automatically at the time you choose below — currently{" "}
+              {estimatedRecipients.toLocaleString()} recipient{estimatedRecipients !== 1 ? "s" : ""}
+              {filterConfigured ? " (the audience filter is re-evaluated at send time)" : ""}.
             </p>
             <div className="space-y-1.5">
               <Label>Date &amp; time</Label>

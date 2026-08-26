@@ -155,9 +155,38 @@ export interface AudienceFilters {
 }
 
 export interface AudiencePreview {
+  /** People matching the filter. NOT the number attached to the campaign. */
   total: number;
   sample: { id: string; email: string; full_name: string | null }[];
+  /** Matches minus suppressed addresses — what would actually be delivered. */
   estimatedDelivery: number;
+  eligible: number;
+  unsubscribed: number;
+  /**
+   * True when no audience condition is set at all. Distinct from `total === 0`,
+   * which means "a real filter that matches nobody". The old API could not tell
+   * these apart: an empty filter returned a count of the entire directory, so
+   * the builder displayed 609 recipients for a campaign that had none attached.
+   */
+  noFilterConfigured: boolean;
+}
+
+/**
+ * Truthful audience numbers for a saved campaign.
+ *
+ * `attached` and `eligibleFromFilter` are separate because they overlap — the
+ * filter is materialized with an idempotent insert at send time, so someone in
+ * both is stored once. `estimatedRecipients` is therefore an upper bound and is
+ * labelled as such in the UI rather than presented as an exact count.
+ */
+export interface CampaignAudienceSummary {
+  attached: number;
+  filterConfigured: boolean;
+  matching: number;
+  unsubscribedExcluded: number;
+  eligibleFromFilter: number;
+  estimatedRecipients: number;
+  canSend: boolean;
 }
 
 // ── Campaigns ───────────────────────────────────────────────────────────
@@ -247,6 +276,12 @@ export async function previewAudience(id: string, filters: AudienceFilters, pagi
     limit: pagination?.limit,
     offset: pagination?.offset,
   });
+  return data;
+}
+
+/** Server-computed audience state for a saved campaign — backs the summary and send confirmation. */
+export async function getAudienceSummary(id: string) {
+  const { data } = await axiosInstance.get<CampaignAudienceSummary>(`${BASE}/campaigns/${id}/audience-summary`);
   return data;
 }
 
