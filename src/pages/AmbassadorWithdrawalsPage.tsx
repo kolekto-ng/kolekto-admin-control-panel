@@ -41,6 +41,10 @@ type Withdrawal = {
     account_name: string;
     account_last4: string;
     account_number?: string | null;
+    // false when the ambassador typed the account name and nothing checked it
+    // against the bank, which is the current behaviour for every ambassador
+    // payout account. Absent on rows written before the flag existed.
+    account_name_verified?: boolean;
   };
 };
 
@@ -274,12 +278,21 @@ export default function AmbassadorWithdrawalsPage() {
                     )}
                   </div>
 
-                  {/* Bank — full account number shown to admin */}
+                  {/* Bank — full account number shown to admin.
+                      The account name here is entered by the ambassador and is
+                      NOT verified against the bank, so it is labelled as such:
+                      whoever makes this transfer is the only check that the
+                      money reaches the right person. */}
                   <div>
                     {account ? (
                       <>
                         <p className="font-medium">{account.bank_name}</p>
                         <p className="text-xs text-muted-foreground">{account.account_name}</p>
+                        {account.account_name_verified === false && (
+                          <p className="mt-0.5 text-[11px] font-medium text-amber-700">
+                            Name entered by ambassador — not bank-verified
+                          </p>
+                        )}
                         <p className="mt-0.5 font-mono text-xs font-semibold text-slate-700">
                           {account.account_number || `****${account.account_last4}`}
                         </p>

@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:test": "vite --mode test",
-    "dev:prod": "vite --mode production",
-    "build": "vite build",
-    "build:test": "vite build --mode test",
-    "build:dev": "vite build --mode development",
+    "dev": "node init && vite",
+    "dev:test": "node init && vite --mode test",
+    "dev:prod": "node init && vite --mode production",
+    "build": "node init && vite build",
+    "build:test": "node init && vite build --mode test",
+    "build:dev": "node init && vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview"
   },

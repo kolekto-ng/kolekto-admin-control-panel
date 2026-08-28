@@ -79,6 +79,13 @@ export default function AmbassadorApplicationsPage() {
   const [status, setStatus] = useState<string>("all");
   const [notes, setNotes] = useState("");
   const [interviewDate, setInterviewDate] = useState("");
+  // The interview email (templates/ambassador/interviewScheduled.js) renders a
+  // timezone, a meeting location/link, and applicant-facing prep notes. The
+  // endpoint has always accepted all three; without inputs for them every
+  // invite went out reading "Details will be shared before the interview".
+  const [interviewTimezone, setInterviewTimezone] = useState("WAT (West Africa Time)");
+  const [interviewLocation, setInterviewLocation] = useState("");
+  const [interviewPrepNotes, setInterviewPrepNotes] = useState("");
   const [resources, setResources] = useState<AmbassadorResource[]>([]);
   const [resourcesLoading, setResourcesLoading] = useState(true);
   const [resourceSaving, setResourceSaving] = useState(false);
@@ -299,18 +306,42 @@ export default function AmbassadorApplicationsPage() {
               )}
 
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                <label className="text-sm font-medium text-blue-950">Interview Date</label>
-                <div className="mt-2 flex flex-col gap-2 md:flex-row">
-                  <Input type="datetime-local" value={interviewDate} onChange={(event) => setInterviewDate(event.target.value)} />
-                  <Button
-                    onClick={() => runAction("interview", () => axiosInstance.patch(endpoint("interview"), { interview_date: interviewDate, notes }))}
-                    disabled={!interviewDate || actionLoading === "interview"}
-                    className="gap-2 bg-blue-700 hover:bg-blue-800"
-                  >
-                    {actionLoading === "interview" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-                    Set Interview
-                  </Button>
+                <p className="text-sm font-semibold text-blue-950">Schedule Interview</p>
+                <p className="mt-1 text-xs text-blue-800">
+                  These details are sent to the applicant in the interview invite. A location starting with http becomes a "Join Interview" button in the email.
+                </p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-xs font-medium text-blue-950">Date &amp; time</label>
+                    <Input className="mt-1" type="datetime-local" value={interviewDate} onChange={(event) => setInterviewDate(event.target.value)} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-blue-950">Timezone label</label>
+                    <Input className="mt-1" value={interviewTimezone} onChange={(event) => setInterviewTimezone(event.target.value)} placeholder="WAT (West Africa Time)" />
+                  </div>
                 </div>
+                <div className="mt-3">
+                  <label className="text-xs font-medium text-blue-950">Meeting location or link</label>
+                  <Input className="mt-1" value={interviewLocation} onChange={(event) => setInterviewLocation(event.target.value)} placeholder="https://meet.google.com/… or a physical address" />
+                </div>
+                <div className="mt-3">
+                  <label className="text-xs font-medium text-blue-950">Prep notes for the applicant</label>
+                  <Textarea className="mt-1" rows={3} value={interviewPrepNotes} onChange={(event) => setInterviewPrepNotes(event.target.value)} placeholder="What they should prepare or bring. Shown to the applicant — separate from Admin Notes below." />
+                </div>
+                <Button
+                  onClick={() => runAction("interview", () => axiosInstance.patch(endpoint("interview"), {
+                    interview_date: interviewDate,
+                    interview_timezone: interviewTimezone,
+                    interview_location: interviewLocation,
+                    interview_prep_notes: interviewPrepNotes,
+                    notes,
+                  }))}
+                  disabled={!interviewDate || actionLoading === "interview"}
+                  className="mt-3 gap-2 bg-blue-700 hover:bg-blue-800"
+                >
+                  {actionLoading === "interview" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
+                  Set Interview &amp; Send Invite
+                </Button>
               </div>
 
               <div>
