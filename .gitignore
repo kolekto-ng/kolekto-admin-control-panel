@@ -28,3 +28,6 @@ dist-ssr
 .env
 .env.test
 .env.production
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
